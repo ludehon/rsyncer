@@ -86,8 +86,8 @@ struct rsyncerApp: App {
         MenuBarExtra {
             MenuBarView(restoreDockIcon: delegate.restoreDockIcon).environmentObject(store)
         } label: {
-            Image(systemName: store.isRunning ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
-                .accessibilityLabel("Rsyncer")
+            Image(nsImage: store.isRunning ? MenuBarBrandMark.active : MenuBarBrandMark.idle)
+                .accessibilityLabel(store.isRunning ? "Rsyncer · \(store.isPaused ? "Paused" : store.isPreview ? "Previewing" : "Syncing")" : "Rsyncer")
         }
     }
 }

@@ -90,9 +90,10 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 23, weight: .semibold))
-                    .foregroundStyle(Palette.soft)
+                BrandMark()
+                    .fill(Palette.soft, style: FillStyle(eoFill: true))
+                    .frame(width: 32, height: 32)
+                    .accessibilityHidden(true)
                 Text("Rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
             Spacer().frame(height: 38)
