@@ -1,83 +1,48 @@
 # rsyncer
 
-A native SwiftUI macOS app for syncing files and folders between local drives and mounted volumes. Requires macOS 14 or later. No third-party dependencies.
+A native macOS app for syncing files and folders between local drives and mounted volumes. Requires macOS 14 or later.
 
-![rsyncer main window](docs/preview.png)
+![Preview of a one-way sync plan](docs/preview-plan.jpg)
 
-Open `rsyncer.xcodeproj` in Xcode, select the **rsyncer** scheme and **My Mac**, then run. For login-item registration, use a signed app installed in a stable location such as `/Applications`.
+## Features
 
-## Using the app
+- **One-way sync** — Copies a file or a folder's contents to a destination. Optionally protects newer destination files and removes files that no longer exist at the source.
+- **Two-way sync** — Merges two folders in both directions, with the newest version of each file winning.
+- **Safe previews** — Shows planned additions, updates, and deletions before changing anything, with searchable item details and affected file sizes.
+- **Transfer controls** — Start, pause, resume, or stop a sync and follow its per-file progress in the app, menu bar, or Dock.
+- **Scheduling** — Run saved syncs hourly, daily, weekly, or when a drive connects. Missed timed runs resume when the app is available.
+- **Saved syncs** — Automatically saves paths, options, schedules, names, and sidebar order for repeat use.
+- **Transfer options** — Supports timestamps, permissions, links, Mac metadata, checksums, exclusions, bandwidth limits, partial files, and other common `rsync` controls.
+- **Volume status** — Displays free space, capacity, availability, read-only state, and low-space warnings for connected drives.
+- **History and logs** — Keeps the latest 250 runs in the app and writes a complete log for every run.
+- **Menu bar and login launch** — Continues running after the window closes and can launch automatically when you sign in.
+- **Themes** — Includes six accent and sidebar colour themes.
 
-1. Click **+** beside **Saved syncs** and choose **One-way sync** or **Two-way sync**. The direction is fixed after creation. Drop a file or folder into **Source**, and a folder or mounted volume into **Destination**. You can also click to browse or type an absolute path (`/…` or `~/…`).
-2. Name the pair. Paths, options and schedules save automatically.
-3. Use **Preview** to see a visual plan without changing files. Summary cards show added, updated, and deleted items with separate file, folder, and link counts and affected file sizes. Destination cards show where changes will happen. Click any card to open a searchable details window with exact target paths. Sizes exclude folders and links; missing sizes are identified rather than counted as zero. The plan appears after comparison finishes; incomplete comparisons are marked clearly.
-   ![Preview showing the planned changes for a one-way sync](docs/preview-plan.jpg)
+## Using rsyncer
 
-4. Choose **Sync now**. Activity shows live output and previous runs; each run has a complete log file.
+1. Click **+** beside **Saved syncs** and choose a one-way or two-way sync.
+2. Drop in the source and destination, or browse to them, then choose the transfer options and schedule.
+3. Select **Preview** to review the plan, then **Sync now** to run it.
 
-   ![Activity list during a run, in a dark theme](docs/activity-dark.jpg)
+If you enable **Launch at login**, macOS may require approval under **System Settings → General → Login Items**.
 
-Click and hold a saved sync’s name or folder icon, then drag it to a new position in the sidebar. Cards shift as you drag, and the order is saved automatically. You can also right-click to rename, delete, launch, pause/resume, or move it up or down. Running syncs show spinning arrows; paused syncs show a pause icon. Rename and delete become available after the active run ends. Pause/resume is also available in the sync screen and menu bar; stopping a paused sync cancels it.
+## Sync behaviour
 
-One-way sync copies a directory's contents into the destination without creating an extra enclosing directory. Source files are never removed. The default **Protect newer destination files** option protects newer destination versions. Extra destination files are retained unless you enable deletion.
+One-way sync never removes source files. Destination-only files are retained unless deletion is explicitly enabled. Deletion applies to scheduled runs and bypasses the Trash.
 
-Two-way sync requires two folders or mounted volumes and copies in both directions, source to destination first. Newer modification dates win; timestamps and skip-newer are always enabled, and deletion is disabled. Files removed from one side are copied back from the other. Equal-date differences favor the source; enable checksums to detect differing contents with equal sizes and dates. This merges files without keeping conflict copies or backup versions. **Only add new files**, if enabled, skips existing files in both directions. Preview compares each direction independently against the current files, so it can list changes that the first actual pass would resolve before the return pass. Existing saved syncs remain one-way.
+Two-way sync runs source to destination first, then returns changes in the other direction. Newer modification dates win; deletion is disabled, so a file removed from one side is restored from the other. Checksums can detect equal-size files whose dates also match.
 
-The options include timestamps, permissions, symlinks, hard links, Mac metadata, checksums, skip-newer, ignore-existing, partial files, compression, whole-file transfers, filesystem boundaries, exclusions and bandwidth limits. Enabling deletion requires confirmation and also applies to scheduled runs. Excluded destination files are protected. Deletion bypasses the Trash.
+The scheduler runs one job at a time. The app prevents idle sleep during transfers, but cannot wake a sleeping or powered-off Mac. Drive-connection schedules only detect mount events while the app is running.
 
-## Scheduling and menu bar
+## Access and data
 
-Choose hourly, daily, weekly, or drive-connection schedules for each saved pair. Timed schedules use local time. The scheduler checks every 30 seconds, runs one job at a time, and retries unavailable locations once per minute. A missed timed run executes once when the app is available again, then advances to the next scheduled time. Drive-connection schedules respond to mount events observed while the app is running.
+Allow access to files and folders when macOS prompts you. Protected locations may require **Full Disk Access**.
 
-Closing the window leaves the menu bar app running. Quitting pauses scheduling; sleeping postpones runs until wake. **Launch at login** uses Apple's [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice). macOS may require approval in System Settings → General → Login Items. The app prevents idle sleep during an active transfer, but does not wake a sleeping or powered-off Mac.
+The app rejects missing, overlapping, or unsafe locations before a run. Cancellation may leave partial files at the destination.
 
-Settings also offer six themes — light purple (the default), light blue, yellow, red, deep blue and deep green — each setting the accent color and the sidebar shade. The choice is kept in the app's user defaults rather than `state.json`.
+Settings and logs are stored in:
 
-## Volumes, progress and logs
-
-Click a selected source or destination icon to open that folder in Finder (file sources are revealed in their containing folder). Click the location name to choose another location.
-
-Each selected source and destination shows a storage bar and free/total capacity. Unavailable locations are identified without showing misleading capacity.
-
-During syncs, the Dock icon shows the same progress as the app, with an animated bar while scanning and an orange bar when paused. It keeps updating with the window closed and clears when the run finishes or stops. Previews do not show a Dock bar.
-
-Connected drives update after mount, unmount and rename events, and every minute. Indicators report capacity, low space (under 10% free), and read-only status. They do not measure SMART or hardware health; use Disk Utility for diagnostics.
-
-Progress is **per file**, matching the bundled rsync's `--progress` output. Previews use the number of items checked in the current direction, rather than the dry run’s zero-byte percentage. Scanning shows indeterminate progress until rsync reports a fixed item total. No total-transfer percentage or ETA is fabricated.
-
-The app runs `/usr/bin/rsync` directly using `Process` arguments, without a shell. Apple's openrsync has a failure when combining extended attributes and dry-run on some macOS versions. Previews therefore omit extended attributes/resource forks; actual syncs preserve them when enabled. The UI and preview log disclose this limitation.
-
-Settings and logs live in:
-
-```
+```text
 ~/Library/Application Support/rsyncer/state.json
 ~/Library/Application Support/rsyncer/Logs/
 ```
-
-The latest 250 runs appear in history. Full logs stay on disk until manually removed and include paths and filenames. Live output is bounded in memory. Settings are written atomically; unreadable settings are preserved rather than overwritten.
-
-## Filesystem access
-
-This is a directly distributed, non-sandboxed macOS utility so the system rsync process can access user-entered paths and mounted volumes. macOS privacy protections still apply. Allow requested Files and Folders permissions; protected locations may require Full Disk Access. App Store distribution would require a different filesystem-access architecture. Signing and notarization are not included in this development build.
-
-Locations must already exist. Validation rejects overlapping locations (including symlink aliases), the filesystem root, missing drives and unwritable destinations. Saved volume UUIDs help detect a different drive mounted at the same path. Filesystem permissions and disk failures during a run are reported through rsync's exit status and log. Cancellation can leave partial destination files.
-
-## Validation
-
-```sh
-./scripts/test.sh
-zsh scripts/test-ui.sh
-xcodebuild -project rsyncer.xcodeproj -scheme rsyncer \
-  -configuration Debug -derivedDataPath /tmp/rsyncer-build \
-  CODE_SIGNING_ALLOWED=NO build
-```
-
-The integration harness runs the production command builder and process runner against isolated temporary folders. It covers dry runs, actual copying, Unicode and shell-like path names, exclusions, opt-in deletion, newer files, symlinks, checksums, metadata flags, single-file sources, path validation, volume identity and capacity lookup, pause/resume, cancellation while paused, saved-sync ordering and renaming, scheduling and persistence. It never syncs personal files or registers a login item.
-
-The UI harness sends mouse events to an isolated app window and checks selection, live dragging in both directions, and saved order after release. It requires a macOS graphical session.
-
-Physical unplug/replug, login after reboot, and macOS privacy prompts should be checked on the target Mac before relying on unattended runs.
-
-Regenerate the app icon assets from `artwork/icon.png` with `python3 scripts/normalize-icon.py && swift scripts/generate-icon.swift`.
-
-The normalise step exists because macOS 26 only recognises artwork as an app icon if its silhouette is a clean, square rounded rectangle; artwork that is even a few percent off square gets pasted onto a generic light plate at roughly 60% size instead of filling the tile. It squares the shape off and re-masks it, keeping a rounded alpha so the icon still renders correctly on macOS 14/15, which do not mask icons themselves.
