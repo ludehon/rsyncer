@@ -59,7 +59,7 @@ With Xcode installed and selected as the active developer directory, run:
 ./scripts/build-dmg.sh
 ```
 
-This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.0.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut with large icons, a Retina background, and drag-and-drop instructions. Running the command again replaces the DMG for that version.
+This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.1.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut with large icons, a Retina background, and drag-and-drop instructions. Running the command again replaces the DMG for that version.
 
 Packaging uses Finder to save the installer window layout, so run it in a logged-in macOS desktop session. If macOS asks, allow your terminal to control Finder. The background and layout are defined in `scripts/generate-dmg-background.swift` and `scripts/layout-dmg.applescript`.
 
@@ -74,11 +74,11 @@ The default build is ad hoc signed for local testing. For public downloads that 
 The script preserves the exported app's signature and notarization ticket. To also sign and notarize the DMG, use your Developer ID identity and a previously configured `notarytool` keychain profile:
 
 ```sh
-codesign --timestamp --sign 'Developer ID Application: Your Name (TEAMID)' build/Rsyncer-1.0.dmg
-xcrun notarytool submit build/Rsyncer-1.0.dmg --keychain-profile 'rsyncer-notary' --wait
+codesign --timestamp --sign 'Developer ID Application: Your Name (TEAMID)' build/Rsyncer-1.1.dmg
+xcrun notarytool submit build/Rsyncer-1.1.dmg --keychain-profile 'rsyncer-notary' --wait
 # Continue only after the submission status is Accepted.
-xcrun stapler staple build/Rsyncer-1.0.dmg
-xcrun stapler validate build/Rsyncer-1.0.dmg
+xcrun stapler staple build/Rsyncer-1.1.dmg
+xcrun stapler validate build/Rsyncer-1.1.dmg
 ```
 
 See Apple's [notarization instructions](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) for certificate and credential setup. Test the downloaded DMG on another Mac before publishing a release.
