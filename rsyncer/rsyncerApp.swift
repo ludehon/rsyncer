@@ -48,9 +48,10 @@ struct MenuBarView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Text(store.isRunning ? "\(store.isPreview ? "Previewing" : "Syncing") \(store.activePairName)" : "rsyncer · Ready when you are")
+        Text(store.isRunning ? "\(store.isPaused ? "Paused" : store.isPreview ? "Previewing" : "Syncing") \(store.activePairName)" : "rsyncer · Ready when you are")
         if store.isRunning {
             Text(store.progressDetail)
+            Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling)
             Button("Stop sync", action: store.cancel).disabled(store.cancelling)
         }
         Divider()

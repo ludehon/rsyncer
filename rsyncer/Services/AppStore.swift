@@ -13,6 +13,7 @@ final class AppStore: ObservableObject {
     @Published var activePairName = ""
     @Published var isPreview = false
     @Published var cancelling = false
+    @Published var isPaused = false
     @Published var output = ""
     @Published var progress: Double?
     @Published var progressDetail = ""
@@ -122,6 +123,20 @@ final class AppStore: ObservableObject {
         save()
     }
 
+    func renamePair(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var pair = pairs.first(where: { $0.id == id }) else { return }
+        pair.name = trimmed
+        update(pair)
+    }
+
+    func movePair(_ id: UUID, by offset: Int) {
+        guard let index = pairs.firstIndex(where: { $0.id == id }), pairs.indices.contains(index + offset) else { return }
+        let pair = pairs.remove(at: index)
+        pairs.insert(pair, at: index + offset)
+        save()
+    }
+
     func chooseLocation(source: Bool, pairID: UUID) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -143,6 +158,7 @@ final class AppStore: ObservableObject {
         activePairName = pair.name
         isPreview = preview
         cancelling = false
+        isPaused = false
         progress = nil
         progressDetail = preview ? "Comparing locations…" : "Building file list…"
         output = heading
@@ -183,6 +199,7 @@ final class AppStore: ObservableObject {
         activePairID = nil
         runner = nil
         cancelling = false
+        isPaused = false
         if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
         if !record.succeeded && !cancelled && errorMessage == nil {
             errorMessage = "rsync exited with code \(code). Some files may not have transferred. Open the run log for details."
@@ -191,7 +208,20 @@ final class AppStore: ObservableObject {
         save()
     }
 
-    func cancel() { cancelling = true; progressDetail = "Stopping rsync…"; runner?.cancel() }
+    func togglePause() {
+        guard isRunning, !cancelling, let runner else { return }
+        let succeeded = isPaused ? runner.resume() : runner.pause()
+        if succeeded { isPaused.toggle() }
+        else { errorMessage = "Could not \(isPaused ? "resume" : "pause") the transfer. It may have already finished." }
+    }
+
+    func cancel() {
+        guard isRunning else { return }
+        cancelling = true
+        isPaused = false
+        progressDetail = "Stopping rsync…"
+        runner?.cancel()
+    }
 
     func tick(now: Date = Date()) {
         guard !isRunning else { return }

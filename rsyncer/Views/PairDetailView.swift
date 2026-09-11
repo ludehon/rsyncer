@@ -24,7 +24,7 @@ struct PairDetailView: View {
                                 .font(.system(size: 13)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Label(locked ? "Syncing" : "One-way sync", systemImage: locked ? "arrow.triangle.2.circlepath" : "arrow.right")
+                        Label(locked ? (store.isPaused ? "Paused" : "Syncing") : "One-way sync", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "arrow.right")
                             .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.green)
                             .padding(.horizontal, 11).padding(.vertical, 7)
                             .background(Palette.green.opacity(0.08), in: Capsule())
@@ -110,19 +110,22 @@ struct PairDetailView: View {
                         Spacer()
                         if let progress = store.progress { Text(progress, format: .percent.precision(.fractionLength(0))).font(.system(size: 11, design: .monospaced)) }
                     }
-                    if let progress = store.progress { ProgressView(value: progress) } else { ProgressView().progressViewStyle(.linear) }
-                    Text(store.progressDetail).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    if let progress = store.progress { ProgressView(value: progress) }
+                    else if store.isPaused { ProgressView(value: 0) }
+                    else { ProgressView().progressViewStyle(.linear) }
+                    Text(store.isPaused ? "Paused — resume to continue this transfer." : store.progressDetail).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(locked ? (store.isPreview ? "Previewing changes" : "Sync in progress") : pair.isConfigured ? "Ready when you are" : "Choose your locations", systemImage: locked ? "arrow.triangle.2.circlepath" : "checkmark.circle")
+                    Label(locked ? (store.isPaused ? "Sync paused" : store.isPreview ? "Previewing changes" : "Sync in progress") : pair.isConfigured ? "Ready when you are" : "Choose your locations", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "checkmark.circle")
                         .font(.system(size: 12, weight: .medium))
                     Text(locked ? "You can close this window. rsyncer stays in the menu bar." : "Preview a sync to see what will change.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if locked {
+                    Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling).controlSize(.large)
                     Button(store.cancelling ? "Stopping…" : "Stop sync", role: .destructive, action: store.cancel).disabled(store.cancelling).controlSize(.large)
                 } else {
                     Button { store.start(pair, preview: true); tab = .activity } label: { Label("Preview", systemImage: "eye").padding(.horizontal, 6) }
@@ -172,6 +175,7 @@ struct LocationCard: View {
                     .font(.system(size: 10, design: .monospaced)).lineLimit(1)
                     .accessibilityLabel(source ? "Source path" : "Destination path")
             }.padding(9).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 5))
+            if !path.isEmpty { LocationStorageView(monitor: store.volumes, path: path) }
         }
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         .background(targeted ? Palette.green.opacity(0.08) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
@@ -185,5 +189,35 @@ struct LocationCard: View {
             store.setLocation(url, source: source, pairID: pairID)
             return true
         } isTargeted: { targeted = $0 }
+    }
+}
+
+struct LocationStorageView: View {
+    @ObservedObject var monitor: VolumeMonitor
+    let path: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let volume = monitor.volume(for: path) {
+                HStack {
+                    Text(volume.name).lineLimit(1)
+                    Spacer()
+                    if volume.total > 0 {
+                        Text("\(volume.usedFraction.formatted(.percent.precision(.fractionLength(0)))) used")
+                            .monospacedDigit().fixedSize()
+                    }
+                }.font(.system(size: 10, weight: .medium))
+                if volume.total > 0 {
+                    ProgressView(value: volume.usedFraction)
+                        .tint(volume.isLow ? .orange : Palette.green)
+                        .accessibilityLabel("\(volume.name) storage used")
+                        .accessibilityValue(volume.usedFraction.formatted(.percent.precision(.fractionLength(0))))
+                }
+                Text(volume.capacityLabel).font(.system(size: 10)).foregroundStyle(.secondary)
+            } else {
+                Label("Volume unavailable", systemImage: "externaldrive.badge.questionmark")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
     }
 }

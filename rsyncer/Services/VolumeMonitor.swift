@@ -52,4 +52,15 @@ final class VolumeMonitor: ObservableObject {
                                  isReadOnly: values.volumeIsReadOnly ?? true, isInternal: values.volumeIsInternal ?? false)
         }.sorted { ($0.isInternal ? "0" : "1") + $0.name < ($1.isInternal ? "0" : "1") + $1.name }
     }
+
+    func volume(for path: String) -> MountedVolume? {
+        guard !path.isEmpty else { return nil }
+        let url = RsyncCommand.url(for: path).resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.volumeURLKey, .volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeIsReadOnlyKey, .volumeIsInternalKey]),
+              let root = values.volume else { return nil }
+        return MountedVolume(url: root, name: values.volumeName ?? root.lastPathComponent,
+                             total: Int64(values.volumeTotalCapacity ?? 0), available: Int64(values.volumeAvailableCapacity ?? 0),
+                             isReadOnly: values.volumeIsReadOnly ?? true, isInternal: values.volumeIsInternal ?? false)
+    }
 }

@@ -36,8 +36,10 @@ struct IntegrationTests {
             }
             guard let result else { throw SyncError.invalid("No completion event") }
             if result.0 != 0 && !result.1 { print("rsync failure: \(output)") }
-            let log = try String(contentsOf: logURL, encoding: .utf8)
-            try expect(output.isEmpty || log.contains(output), "Full process output reaches log")
+            let log = try Data(contentsOf: logURL)
+            // Compare bytes: a trailing CR merges with the footer’s LF into one
+            // Swift Character, so String.contains can reject matching output.
+            try expect(output.isEmpty || log.range(of: Data(output.utf8)) != nil, "Full process output reaches log")
             return (result.0, result.1, output)
         }
 
@@ -117,17 +119,30 @@ struct IntegrationTests {
         cancelWorker.cancel()
         result = try await run(pair, worker: cancelWorker)
         try expect(result.1, "Cancellation before launch handled")
-        try Data(repeating: 65, count: 1024 * 1024).write(to: source.appendingPathComponent("large.bin"))
-        pair.options.bandwidthLimit = 32
+        try Data(repeating: 65, count: 4 * 1024 * 1024).write(to: source.appendingPathComponent("large.bin"))
+        pair.options.bandwidthLimit = 512
         pair.options.compress = false
         let activeWorker = RsyncRunner()
         let cancelTask = Task {
+            defer { activeWorker.cancel() }
             try await Task.sleep(for: .milliseconds(400))
-            activeWorker.cancel()
+            try expect(activeWorker.pause(), "Active transfer can be paused")
+            func destinationBytes() -> Int {
+                let files = (try? fm.contentsOfDirectory(at: destination, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+                return files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) }
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            let pausedBytes = destinationBytes()
+            try await Task.sleep(for: .milliseconds(1200))
+            try expect(destinationBytes() == pausedBytes, "Paused transfer stops destination writes")
+            try expect(activeWorker.resume(), "Paused transfer can resume")
+            try await Task.sleep(for: .seconds(2))
+            try expect(destinationBytes() > pausedBytes, "Resumed transfer continues writing")
+            try expect(activeWorker.pause(), "Resumed transfer can pause again before cancellation")
         }
         result = try await run(pair, worker: activeWorker)
         _ = try await cancelTask.value
-        try expect(result.1 && result.0 != 0, "Active transfer cancellation terminates the child")
+        try expect(result.1 && result.0 != 0, "Cancelling a paused transfer terminates the child")
         pair.options.bandwidthLimit = 0
 
         var calendar = Calendar(identifier: .gregorian)
@@ -149,9 +164,32 @@ struct IntegrationTests {
         store.update(saved)
         let reloaded = AppStore(dataDirectory: settings, enableScheduling: false)
         try expect(reloaded.pairs[0].name == "Persisted pair" && reloaded.pairs[0].sourceVolumeID != nil, "Pairs, schedules, and volume identity persist")
+        let slots: [CGFloat] = [29, 93, 157, 221]
+        try expect(SyncReorder.destination(for: 105, slotCenters: slots) == 1, "Dragging down crosses into the next row before release")
+        try expect(SyncReorder.destination(for: 80, slotCenters: slots) == 1, "Dragging up crosses into the previous row before release")
+        try expect(SyncReorder.destination(for: -50, slotCenters: slots) == 0, "Dragging above the list clamps to the first slot")
+        try expect(SyncReorder.destination(for: 400, slotCenters: slots) == 3, "Dragging below the list clamps to the last slot")
+        try expect(SyncReorder.destination(for: 0, slotCenters: []) == nil, "Empty lists have no reorder target")
+        store.addPair()
+        let addedID = store.selectedID!
+        store.renamePair(addedID, to: "  Second sync  ")
+        store.movePair(addedID, by: -1)
+        let reordered = AppStore(dataDirectory: settings, enableScheduling: false)
+        try expect(reordered.pairs.first?.id == addedID && reordered.pairs.first?.name == "Second sync", "Renaming and reordering survive reload")
+        store.movePair(addedID, by: -1)
+        try expect(store.pairs.first?.id == addedID && store.selectedID == addedID, "Moving past the top preserves order and selection")
+        store.movePair(addedID, by: 1)
+        try expect(store.pairs.last?.id == addedID, "Saved sync can move down")
+        try expect(store.volumes.volume(for: source.appendingPathComponent("hello.txt").path)?.total ?? 0 > 0, "File source resolves to volume capacity")
+        try expect(store.volumes.volume(for: alias.path)?.url == store.volumes.volume(for: source.path)?.url, "Symlink source resolves to the target volume")
+        try expect(store.volumes.volume(for: root.appendingPathComponent("missing").path) == nil, "Unavailable location does not report another volume's capacity")
         reloaded.pairs[0].nextRun = Date().addingTimeInterval(-60)
         reloaded.tick()
         try expect(reloaded.isRunning, "Overdue scheduled sync starts")
+        reloaded.togglePause()
+        try expect(reloaded.isPaused && reloaded.isRunning, "Pausing preserves the active sync")
+        reloaded.togglePause()
+        try expect(!reloaded.isPaused && reloaded.isRunning, "Resuming preserves the active sync")
         let deadline = Date().addingTimeInterval(10)
         while reloaded.isRunning && Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
         try expect(!reloaded.isRunning && reloaded.history.first?.succeeded == true, "Scheduled run completes and records history")

@@ -13,6 +13,8 @@ Open `rsyncer.xcodeproj` in Xcode, select the **rsyncer** scheme and **My Mac**,
 3. Use **Preview** to inspect planned file changes without writing to the destination.
 4. Choose **Sync now**. Activity shows live output and previous runs; each run has a complete log file.
 
+Click and hold a saved sync’s name or folder icon, then drag it to a new position in the sidebar. Cards shift as you drag, and the order is saved automatically. You can also right-click to rename, delete, launch, pause/resume, or move it up or down. Running syncs show spinning arrows; paused syncs show a pause icon. Rename and delete become available after the active run ends. Pause/resume is also available in the sync screen and menu bar; stopping a paused sync cancels it.
+
 Syncs are one-way. A directory's contents are copied into the destination, without creating an extra enclosing directory. Source files are never removed. Existing destination files can be updated; the default **Skip newer files** option protects newer destination versions. Extra destination files are retained unless you explicitly enable deletion. This is not a bidirectional conflict-resolution tool or a versioned backup system.
 
 The options include timestamps, permissions, symlinks, hard links, Mac metadata, checksums, skip-newer, ignore-existing, partial files, compression, whole-file transfers, filesystem boundaries, exclusions and bandwidth limits. Enabling deletion requires confirmation and also applies to scheduled runs. Excluded destination files are protected. Deletion bypasses the Trash.
@@ -24,6 +26,8 @@ Choose hourly, daily, weekly, or drive-connection schedules for each saved pair.
 Closing the window leaves the menu bar app running. Quitting pauses scheduling; sleeping postpones runs until wake. **Launch at login** uses Apple's [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice). macOS may require approval in System Settings → General → Login Items. The app prevents idle sleep during an active transfer, but does not wake a sleeping or powered-off Mac.
 
 ## Volumes, progress and logs
+
+Each selected source and destination shows its volume’s used percentage, storage bar, and free/total capacity. Unavailable locations are identified without showing misleading capacity.
 
 Connected drives update after mount, unmount and rename events, and every minute. Indicators report capacity, low space (under 10% free), and read-only status. They do not measure SMART or hardware health; use Disk Utility for diagnostics.
 
@@ -50,12 +54,15 @@ Locations must already exist. Validation rejects overlapping locations (includin
 
 ```sh
 ./scripts/test.sh
+zsh scripts/test-ui.sh
 xcodebuild -project rsyncer.xcodeproj -scheme rsyncer \
   -configuration Debug -derivedDataPath /tmp/rsyncer-build \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-The integration harness runs the production command builder and process runner against isolated temporary folders. It covers dry runs, actual copying, Unicode and shell-like path names, exclusions, opt-in deletion, newer files, symlinks, checksums, metadata flags, single-file sources, path validation, volume identity, cancellation, scheduling and persistence. It never syncs personal files or registers a login item.
+The integration harness runs the production command builder and process runner against isolated temporary folders. It covers dry runs, actual copying, Unicode and shell-like path names, exclusions, opt-in deletion, newer files, symlinks, checksums, metadata flags, single-file sources, path validation, volume identity and capacity lookup, pause/resume, cancellation while paused, saved-sync ordering and renaming, scheduling and persistence. It never syncs personal files or registers a login item.
+
+The UI harness sends mouse events to an isolated app window and checks selection, live dragging in both directions, and saved order after release. It requires a macOS graphical session.
 
 Physical unplug/replug, login after reboot, and macOS privacy prompts should be checked on the target Mac before relying on unattended runs.
 

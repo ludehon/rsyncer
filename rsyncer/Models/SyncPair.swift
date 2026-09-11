@@ -83,3 +83,10 @@ struct PersistedState: Codable {
     var pairs: [SyncPair]
     var history: [RunRecord]
 }
+
+/// Uses the starting layout so animated rows cannot shift drag thresholds.
+enum SyncReorder {
+    static func destination(for center: CGFloat, slotCenters: [CGFloat]) -> Int? {
+        slotCenters.indices.min { abs(slotCenters[$0] - center) < abs(slotCenters[$1] - center) }
+    }
+}
