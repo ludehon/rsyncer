@@ -89,6 +89,14 @@ struct RunRecord: Identifiable, Codable {
     var logPath: String
     var succeeded: Bool { exitCode == 0 && !cancelled }
     var title: String { cancelled ? "Cancelled" : succeeded ? (preview ? "Preview complete" : "Sync complete") : "Needs attention" }
+    var durationLabel: String {
+        let totalSeconds = max(0, Int(finishedAt.timeIntervalSince(startedAt)))
+        guard totalSeconds >= 60 else { return "\(totalSeconds.formatted())s" }
+
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return seconds == 0 ? "\(minutes.formatted())m" : "\(minutes.formatted())m \(seconds)s"
+    }
 }
 
 struct PersistedState: Codable {

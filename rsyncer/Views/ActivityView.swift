@@ -79,7 +79,7 @@ struct ActivityView: View {
                         .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(record.title).font(.system(size: 12, weight: .medium))
-                        Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(Int(record.finishedAt.timeIntervalSince(record.startedAt)))s · exit \(record.exitCode)")
+                        Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     Spacer()

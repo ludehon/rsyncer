@@ -44,6 +44,14 @@ struct IntegrationTests {
             return (result.0, result.1, output)
         }
 
+        let durationStart = Date(timeIntervalSinceReferenceDate: 0)
+        var durationRecord = RunRecord(pairID: UUID(), pairName: "Duration", startedAt: durationStart, finishedAt: durationStart.addingTimeInterval(59), preview: false, exitCode: 0, cancelled: false, logPath: "")
+        try expect(durationRecord.durationLabel == "59s", "Short run durations remain in seconds")
+        durationRecord.finishedAt = durationStart.addingTimeInterval(60)
+        try expect(durationRecord.durationLabel == "1m", "Whole-minute run durations omit zero seconds")
+        durationRecord.finishedAt = durationStart.addingTimeInterval(8016)
+        try expect(durationRecord.durationLabel == "133m 36s", "Long run durations display minutes and remaining seconds")
+
         try write("hello.txt", "hello world", to: source)
         try write(".DS_Store", "excluded", to: source)
         try write("extra.txt", "keep by default", to: destination)
