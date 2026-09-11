@@ -7,7 +7,7 @@ struct PairDetailView: View {
     @Binding var tab: DetailTab
     @State private var confirmMirror = false
     @State private var hoveringMode = false
-    enum DetailTab: String, CaseIterable { case options = "Options", schedule = "Schedule", preview = "Preview", activity = "Activity" }
+    enum DetailTab: String, CaseIterable { case activity = "Activity", preview = "Preview", schedule = "Schedule", options = "Options" }
     private var pair: SyncPair { store.pairs.first { $0.id == pairID } ?? SyncPair() }
     private var locked: Bool { store.activePairID == pairID }
     private var binding: Binding<SyncPair> { Binding(get: { pair }, set: { store.update($0) }) }
@@ -94,14 +94,6 @@ struct PairDetailView: View {
                 }
             }
             HStack {
-                Button(action: store.revealLogs) {
-                    Label("View logs", systemImage: "doc.text")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.accentBright)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .controlSize(.large)
                 Spacer()
                 if locked {
                     Button(action: store.togglePause) {
@@ -268,7 +260,7 @@ struct LocationStorageView: View {
                 Text(volume.capacityLabel).font(.system(size: 10)).foregroundStyle(.secondary)
             } else {
                 Label("Volume unavailable", systemImage: "externaldrive.badge.questionmark")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .font(.system(size: 10)).foregroundStyle(.red)
             }
         }
     }

@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var renameText = ""
     @State private var deleteID: UUID?
     @State private var launchID: UUID?
-    @State private var detailTab = PairDetailView.DetailTab.options
+    @State private var detailTab = PairDetailView.DetailTab.activity
     @State private var draggedPairID: UUID?
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var dragSlots: [CGRect] = []
@@ -46,7 +46,7 @@ struct ContentView: View {
         .frame(minWidth: 980, minHeight: 720)
         .tint(Palette.accent)
         .onChange(of: store.selectedID) { _, selectedID in
-            detailTab = selectedID == store.activePairID ? .activity : .options
+            detailTab = .activity
         }
         .sheet(isPresented: $showSettings) { AppSettingsView().environmentObject(store) }
         .alert("Rename saved sync", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
@@ -90,9 +90,10 @@ struct ContentView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 23, weight: .semibold))
-                    .foregroundStyle(Palette.soft)
+                BrandMark()
+                    .fill(Palette.soft, style: FillStyle(eoFill: true))
+                    .frame(width: 32, height: 32)
+                    .accessibilityHidden(true)
                 Text("Rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
             Spacer().frame(height: 38)
@@ -187,13 +188,12 @@ struct ContentView: View {
                 if !active { finishReordering() }
             }
             Spacer(minLength: 20)
-            Divider().overlay(.white.opacity(0.1)).padding(.horizontal, 24).padding(.vertical, 20)
             Button { showSettings = true } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "slider.horizontal.3")
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 18, weight: .medium))
                     Text("Settings").font(.system(size: 12))
                     Spacer()
-                    Text("1.0").font(.system(size: 10)).foregroundStyle(.white.opacity(0.3))
                 }.foregroundStyle(.white.opacity(0.65))
             }.buttonStyle(.plain).padding(.horizontal, 24).padding(.bottom, 24)
         }
@@ -263,7 +263,7 @@ struct ContentView: View {
     }
 
     private func selectSavedPair(_ pair: SyncPair) {
-        detailTab = store.activePairID == pair.id ? .activity : .options
+        detailTab = .activity
         store.selectedID = pair.id
         store.showingVolumes = false
     }

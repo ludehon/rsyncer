@@ -17,9 +17,29 @@ struct ScheduleView: View {
                 Text("Give your sync a rhythm").font(.system(size: 16, weight: .semibold))
                 Text("Automatic runs use this pair’s saved options.").font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            Picker("Run this sync", selection: $pair.schedule.kind) {
-                ForEach(ScheduleKind.allCases) { kind in Text(kind.title).tag(kind) }
-            }.frame(maxWidth: 360).pickerStyle(.menu)
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text("Run this sync")
+                Menu {
+                    ForEach(ScheduleKind.allCases) { kind in
+                        Button(kind.title) {
+                            var changed = pair
+                            changed.schedule.kind = kind
+                            pair = changed
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Text(pair.schedule.kind.title)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(width: 360, height: 48)
+                    .background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .accessibilityLabel("Run this sync")
+                .menuStyle(.borderlessButton)
+            }
             if pair.schedule.kind == .daily || pair.schedule.kind == .weekly {
                 DatePicker("At", selection: time, displayedComponents: .hourAndMinute).frame(maxWidth: 360)
             }
@@ -43,8 +63,6 @@ struct ScheduleView: View {
                 Label("Quietly working in the background", systemImage: "menubar.rectangle").font(.system(size: 12, weight: .medium))
                 Text("Schedules run while rsyncer is open, including with its window closed. Missed timed runs resume after wake or relaunch. Unavailable drives are checked again automatically. Quitting rsyncer pauses scheduling.")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Toggle("Launch rsyncer at login", isOn: Binding(get: { store.loginEnabled }, set: store.setLoginEnabled))
-                    .toggleStyle(.switch).controlSize(.small).font(.system(size: 12))
             }.padding(18).cardSurface(radius: 10, fill: Palette.accent.opacity(0.07), stroke: Palette.accent.opacity(0.2))
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
