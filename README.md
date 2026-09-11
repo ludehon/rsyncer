@@ -10,7 +10,7 @@ Open `rsyncer.xcodeproj` in Xcode, select the **rsyncer** scheme and **My Mac**,
 
 1. Click **+** beside **Saved syncs** and choose **One-way sync** or **Two-way sync**. The direction is fixed after creation. Drop a file or folder into **Source**, and a folder or mounted volume into **Destination**. You can also click to browse or type an absolute path (`/…` or `~/…`).
 2. Name the pair. Paths, options and schedules save automatically.
-3. Use **Preview** to inspect planned file changes without writing to the destination.
+3. Use **Preview** to see a visual plan without changing files. Summary cards show added, updated, and deleted items with separate file, folder, and link counts and affected file sizes. Destination cards show where changes will happen. Click any card to open a searchable details window with exact target paths. Sizes exclude folders and links; missing sizes are identified rather than counted as zero. The plan appears after comparison finishes; incomplete comparisons are marked clearly.
 4. Choose **Sync now**. Activity shows live output and previous runs; each run has a complete log file.
 
 Click and hold a saved sync’s name or folder icon, then drag it to a new position in the sidebar. Cards shift as you drag, and the order is saved automatically. You can also right-click to rename, delete, launch, pause/resume, or move it up or down. Running syncs show spinning arrows; paused syncs show a pause icon. Rename and delete become available after the active run ends. Pause/resume is also available in the sync screen and menu bar; stopping a paused sync cancels it.
@@ -35,7 +35,7 @@ Each selected source and destination shows a storage bar and free/total capacity
 
 Connected drives update after mount, unmount and rename events, and every minute. Indicators report capacity, low space (under 10% free), and read-only status. They do not measure SMART or hardware health; use Disk Utility for diagnostics.
 
-Progress is **per file**, matching the bundled rsync's `--progress` output. Scanning and previews show indeterminate progress. No total-transfer percentage or ETA is fabricated.
+Progress is **per file**, matching the bundled rsync's `--progress` output. Previews use the number of items checked in the current direction, rather than the dry run’s zero-byte percentage. Scanning shows indeterminate progress until rsync reports a fixed item total. No total-transfer percentage or ETA is fabricated.
 
 The app runs `/usr/bin/rsync` directly using `Process` arguments, without a shell. Apple's openrsync has a failure when combining extended attributes and dry-run on some macOS versions. Previews therefore omit extended attributes/resource forks; actual syncs preserve them when enabled. The UI and preview log disclose this limitation.
 

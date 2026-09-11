@@ -53,6 +53,25 @@ struct IntegrationTests {
         var result = try await run(pair, preview: true)
         try expect(result.0 == 0, "Dry run exits successfully")
         try expect(!fm.fileExists(atPath: destination.appendingPathComponent("hello.txt").path), "Preview does not copy files")
+        let escaped = SyncPreview.parse("RSYNCER|>f+++++++|line\\#012break.txt\n", pair: pair)
+        try expect(escaped.first?.relativePath == "line\nbreak.txt", "Visual preview decodes escaped filenames")
+        let additions = SyncPreview.parse(result.2, pair: pair)
+        try expect(additions.first { $0.name == "hello.txt" }?.size == 11, "Preview captures actual file sizes from rsync")
+        let sized = SyncPreview.parse("RSYNCER2|>f+++++++|2048|nested/name|with separator.txt\nRSYNCER2|cd+++++++|4096|nested/\nRSYNCER2|cL+++++++|12|shortcut\nRSYNCER2|>f.s.......|0|empty.txt\n*deleting unknown.txt\n", pair: pair)
+        let metrics = PreviewMetrics(sized)
+        try expect(sized[0].relativePath == "nested/name|with separator.txt", "Sized preview preserves filename separators")
+        try expect(metrics.files == 3 && metrics.folders == 1 && metrics.links == 1, "Summary counts files, folders and links separately")
+        try expect(metrics.bytes == 2048 && metrics.unknownSizes == 1, "Summary excludes folder and link sizes and retains unknown sizes")
+        try expect(metrics.sizeLabel.hasSuffix("known"), "Partial size totals are identified")
+        try expect(PreviewMetrics(Array(sized.suffix(1))).sizeLabel == "Size unavailable", "Missing deletion sizes are not reported as zero")
+        try expect(additions.contains { $0.kind == .added && $0.targetPath == destination.appendingPathComponent("hello.txt").path }, "Visual preview maps additions to their exact destination")
+        try expect(additions.contains { $0.isLink && $0.name == "hello-link" }, "Visual preview identifies symbolic links")
+        let fixture = "RSYNCER|cd+++++++|nested/\nRSYNCER|>f+++++++|nested/name|with spaces.txt\nPass 2/2: Destination → Source\nRSYNCER|>f.s....|ignored short code\nRSYNCER|>f.s.......|changed.txt\n*deleting old.txt\n"
+        let planned = SyncPreview.parse(fixture, pair: pair)
+        try expect(planned.count == 4 && planned[0].isDirectory, "Visual preview parses folders and rejects malformed item records")
+        try expect(planned[1].relativePath == "nested/name|with spaces.txt", "Visual preview preserves spaces and separators in filenames")
+        try expect(planned[2].kind == .updated && planned[2].targetRoot == RsyncCommand.url(for: pair.source).path, "Reverse-pass updates target the source")
+        try expect(planned[3].kind == .deleted && planned[3].targetRoot == RsyncCommand.url(for: pair.source).path, "Reverse-pass deletions retain their direction")
         result = try await run(pair)
         try expect(result.0 == 0, "Default flags work with system rsync")
         let copied = try String(contentsOf: destination.appendingPathComponent("hello.txt"), encoding: .utf8)
@@ -65,6 +84,7 @@ struct IntegrationTests {
         pair.options.deleteExtraneous = true
         result = try await run(pair, preview: true)
         try expect(fm.fileExists(atPath: destination.appendingPathComponent("extra.txt").path), "Preview with deletion still preserves destination files")
+        try expect(SyncPreview.parse(result.2, pair: pair).contains { $0.kind == .deleted && $0.name == "extra.txt" }, "Visual preview identifies actual rsync deletions")
         result = try await run(pair)
         try expect(result.0 == 0 && !fm.fileExists(atPath: destination.appendingPathComponent("extra.txt").path), "Opt-in deletion removes extra files")
         let excluded = try String(contentsOf: destination.appendingPathComponent(".DS_Store"), encoding: .utf8)
@@ -146,6 +166,23 @@ struct IntegrationTests {
         try expect(legacy.direction == .oneWay, "Existing saved syncs default to one-way")
 
         try expect(TransferProgress.parse(" 1,024  42%  1.2MB/s 0:00:03")?.fraction == 0.42, "Per-file progress parsed")
+        let comparison = TransferProgress.comparison("0  0%  00:00:00 (xfer#6480, to-check=16579/18319)", countsCompleted: true)
+        try expect(comparison != nil && abs(comparison!.fraction - 16579.0 / 18319.0) < 0.000001, "Dry-run progress uses checked items despite zero transferred bytes")
+        try expect(TransferProgress.comparison("0 0% 00:00:00 (xfer#3, to-chk=0/100)", countsCompleted: false)?.fraction == 1, "Completed comparison reaches 100 percent")
+        let ascending = [2, 3, 4, 5, 6, 7, 8].compactMap {
+            TransferProgress.comparison("0 0% 00:00:00 (xfer#1, to-check=\($0)/9)", countsCompleted: true)?.fraction
+        }
+        try expect(ascending.count == 7 && zip(ascending, ascending.dropFirst()).allSatisfy { $0 < $1 }, "Captured openrsync counters advance the preview bar forward")
+        try expect(TransferProgress.comparison("0 0% 00:00:00 (to-check=100/100)", countsCompleted: true)?.fraction == 1, "Openrsync completed count reaches 100 percent")
+        let descending = [8, 7, 6, 5, 4, 3, 2].compactMap {
+            TransferProgress.comparison("0 0% 00:00:00 (xfer#1, to-check=\($0)/9)", countsCompleted: false)?.fraction
+        }
+        try expect(zip(descending, descending.dropFirst()).allSatisfy { $0 < $1 }, "Standard rsync remaining counters also advance forward")
+        try expect(TransferProgress.comparison("0 0% 00:00:00 (to-check=0/0)") == nil, "Empty comparison avoids division by zero")
+        try expect(TransferProgress.comparison("0 0% 00:00:00 (to-check=101/100)") == nil, "Invalid comparison counts ignored")
+        try expect(TransferProgress.comparison("0 0% 00:00:00 (ir-chk=10/100)") == nil, "Growing file lists do not report a fixed percentage")
+        try expect(TransferProgress.comparison("0 0% 00:00:00") == nil, "Dry-run byte percentage without counts is ignored")
+        try expect(TransferProgress.comparison("RSYNCER2|>f+++++++|0|to-check=0/100") == nil, "Filenames cannot spoof comparison progress")
         try expect(TransferProgress.parse("file.txt") == nil, "Non-progress output ignored")
         try expect(TransferProgress.parse("report 42%.txt") == nil, "Percent signs in filenames are not treated as progress")
 
@@ -190,6 +227,10 @@ struct IntegrationTests {
 
         let settings = root.appendingPathComponent("settings")
         let store = AppStore(dataDirectory: settings, enableScheduling: false)
+        store.start(pair, preview: true)
+        try expect(store.syncPreview?.complete == false, "Visual preview begins in the comparing state")
+        while store.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        try expect(store.syncPreview?.complete == true && store.syncPreview?.succeeded == true, "Visual preview loads the completed log into the store")
         var saved = store.pairs[0]
         saved.name = "Persisted pair"
         saved.source = source.path

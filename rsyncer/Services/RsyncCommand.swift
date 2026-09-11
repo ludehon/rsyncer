@@ -8,6 +8,23 @@ enum SyncError: LocalizedError {
 enum RsyncCommand {
     static let executable = "/usr/bin/rsync"
 
+    // Apple's openrsync reports visited entries in to-check; standard rsync
+    // reports remaining entries. Probe the executable once, not on every update.
+    static let comparisonCountsCompleted: Bool = {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["--version"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: output, as: UTF8.self).lowercased().contains("openrsync")
+        } catch { return false }
+    }()
+
     static func url(for path: String) -> URL {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.resolvingSymlinksInPath()
     }
@@ -82,6 +99,7 @@ enum RsyncCommand {
             (o.preserveHardLinks, "--hard-links"), (preview, "--dry-run")
         ]
         args += flags.filter(\.0).map(\.1)
+        if preview { args.append("--out-format=RSYNCER2|%i|%l|%n") }
         if o.bandwidthLimit > 0 { args.append("--bwlimit=\(o.bandwidthLimit)") }
         if o.excludeHidden { args.append("--exclude=.*") }
         for pattern in o.excludePatterns.components(separatedBy: .newlines) where !pattern.isEmpty {
@@ -118,6 +136,19 @@ enum RsyncCommand {
 struct TransferProgress {
     var fraction: Double
     var detail: String
+
+    static func comparison(_ line: String, countsCompleted: Bool = RsyncCommand.comparisonCountsCompleted) -> TransferProgress? {
+        // Dry runs transfer no bytes. Only the completed file-list counter
+        // describes comparison progress; ir-chk has a still-growing total.
+        guard parse(line) != nil,
+              let range = line.range(of: #"\b(?:to-check|to-chk)=([0-9]+)/([0-9]+)"#, options: .regularExpression) else { return nil }
+        let counts = line[range].split(separator: "=")[1].split(separator: "/")
+        guard counts.count == 2, let count = Int(counts[0]), let total = Int(counts[1]),
+              total > 0, count <= total else { return nil }
+        let checked = countsCompleted ? count : total - count
+        return TransferProgress(fraction: Double(checked) / Double(total),
+                                detail: "\(checked.formatted()) of \(total.formatted()) items checked")
+    }
 
     static func parse(_ line: String) -> TransferProgress? {
         guard line.range(of: #"^\s*[\d,]+\s+\d{1,3}%\s"#, options: .regularExpression) != nil,

@@ -9,7 +9,16 @@ struct RenderPreview {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rsyncer-render-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = AppStore(dataDirectory: directory, enableScheduling: false)
-        let view = ContentView().environmentObject(store).frame(width: 1120, height: 840)
+        let visualPreview = CommandLine.arguments.contains("--sync-preview")
+        let pair = SyncPair(name: "Photo backup", source: "/Users/lucien/Pictures", destination: "/Volumes/Archive/Photos")
+        if visualPreview {
+            store.pairs = [pair]
+            store.syncPreview = SyncPreview(pair: pair, changes: SyncPreview.parse("RSYNCER2|cd+++++++|4096|Summer 2026/\nRSYNCER2|>f+++++++|8400000|Summer 2026/Coast.jpg\nRSYNCER2|>f+++++++|6200000|Summer 2026/Sunset.jpg\nRSYNCER2|>f.s.......|4200000|Favorites.jpg\n*deleting Old export.jpg\n", pair: pair), complete: true, succeeded: true)
+        }
+        let content = visualPreview
+            ? AnyView(ScrollView { SyncPreviewView(pairID: pair.id).padding(32) })
+            : AnyView(ContentView())
+        let view = content.background(Color(nsColor: .windowBackgroundColor)).environmentObject(store).frame(width: 1120, height: 840)
         let host = NSHostingView(rootView: view)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 840), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host

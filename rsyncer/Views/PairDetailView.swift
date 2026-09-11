@@ -6,7 +6,8 @@ struct PairDetailView: View {
     let pairID: UUID
     @State private var tab = DetailTab.options
     @State private var confirmMirror = false
-    enum DetailTab: String, CaseIterable { case options = "Options", schedule = "Schedule", activity = "Activity" }
+    @State private var hoveringMode = false
+    enum DetailTab: String, CaseIterable { case options = "Options", schedule = "Schedule", preview = "Preview", activity = "Activity" }
     private var pair: SyncPair { store.pairs.first { $0.id == pairID } ?? SyncPair() }
     private var locked: Bool { store.activePairID == pairID }
     private var binding: Binding<SyncPair> { Binding(get: { pair }, set: { store.update($0) }) }
@@ -15,33 +16,28 @@ struct PairDetailView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 25) {
-                    HStack(alignment: .top) {
+                    HStack(alignment: .center, spacing: 12) {
                         Label(locked ? (store.isPaused ? "Paused" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Color(red: 0.36, green: 0.72, blue: 0.55))
                             .padding(.horizontal, 13).padding(.vertical, 8)
                             .background(Palette.green.opacity(0.14), in: Capsule())
+                            .contentShape(Capsule())
+                            .onHover { hoveringMode = $0 }
+                            .popover(isPresented: $hoveringMode, arrowEdge: .bottom) {
+                                Text(pair.direction == .oneWay
+                                     ? "Folder contents are copied into the destination. Your source stays intact."
+                                     : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
+                                    .font(.system(size: 11))
+                                    .frame(maxWidth: 260, alignment: .leading)
+                                    .padding(12)
+                            }
                         Spacer()
                     }
                     HStack(spacing: 14) {
                         LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
-                        Button {
-                            var swapped = pair
-                            swap(&swapped.source, &swapped.destination)
-                            swap(&swapped.sourceVolumeID, &swapped.destinationVolumeID)
-                            store.update(swapped)
-                        } label: {
-                            Image(systemName: "arrow.left.arrow.right").font(.system(size: 16)).foregroundStyle(.secondary)
-                                .frame(width: 32, height: 36)
-                        }.buttonStyle(.plain).help("Swap source and destination")
                         LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
                     }.disabled(locked)
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle")
-                        Text(pair.direction == .oneWay
-                             ? "Folder contents are copied into the destination. Your source stays intact."
-                             : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
-                    }.font(.system(size: 11)).foregroundStyle(.secondary)
                     VStack(spacing: 0) {
                         HStack(spacing: 27) {
                             ForEach(DetailTab.allCases, id: \.self) { item in
@@ -68,6 +64,7 @@ struct PairDetailView: View {
                             case .options: SyncOptionsView(options: binding.options, twoWay: pair.direction == .twoWay).disabled(locked)
                             case .schedule: ScheduleView(pair: binding).disabled(locked)
                             case .activity: ActivityView(pairID: pairID)
+                            case .preview: SyncPreviewView(pairID: pairID)
                             }
                         }.padding(.top, 22)
                     }
@@ -85,7 +82,7 @@ struct PairDetailView: View {
             if locked {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text(store.isPreview ? "Comparing files" : "Current file progress").font(.system(size: 11, weight: .medium))
+                        Text(store.isPreview ? (pair.direction == .twoWay ? "Comparing files · current direction" : "Comparing files") : "Current file progress").font(.system(size: 11, weight: .medium))
                         Spacer()
                         if let progress = store.progress { Text(progress, format: .percent.precision(.fractionLength(0))).font(.system(size: 11, design: .monospaced)) }
                     }
@@ -111,13 +108,34 @@ struct PairDetailView: View {
                     Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling).controlSize(.large)
                     Button(store.cancelling ? "Stopping…" : "Stop sync", role: .destructive, action: store.cancel).disabled(store.cancelling).controlSize(.large)
                 } else {
-                    Button { store.start(pair, preview: true); tab = .activity } label: { Label("Preview", systemImage: "eye").padding(.horizontal, 6) }
-                        .controlSize(.large).disabled(!pair.isConfigured || store.isRunning)
+                    Button { store.start(pair, preview: true); tab = .preview } label: {
+                        Label("Preview", systemImage: "eye")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.green)
+                            .padding(.horizontal, 18).frame(height: 30)
+                            .background(Palette.green.opacity(0.05), in: Capsule())
+                            .overlay {
+                                Capsule().strokeBorder(Color.primary.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            }
+                            .contentShape(Capsule())
+                    }
+                        .buttonStyle(.plain)
+                        .opacity(!pair.isConfigured || store.isRunning ? 0.4 : 1)
+                        .disabled(!pair.isConfigured || store.isRunning)
                     Button {
                         if pair.direction == .oneWay && pair.options.deleteExtraneous { confirmMirror = true }
                         else { store.start(pair, preview: false); tab = .activity }
-                    } label: { Label("Sync now", systemImage: pair.direction.symbol).padding(.horizontal, 12) }
-                        .buttonStyle(.borderedProminent).controlSize(.large).disabled(!pair.isConfigured || store.isRunning)
+                    } label: {
+                        Label("Sync now", systemImage: pair.direction.symbol)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 24).frame(height: 30)
+                            .background(Palette.green, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                        .buttonStyle(.plain)
+                        .opacity(!pair.isConfigured || store.isRunning ? 0.4 : 1)
+                        .disabled(!pair.isConfigured || store.isRunning)
                 }
             }
         }.padding(.horizontal, 32).padding(.vertical, 20).background(.background).overlay(alignment: .top) { Divider() }

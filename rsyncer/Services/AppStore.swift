@@ -12,6 +12,7 @@ final class AppStore: ObservableObject {
     @Published var activePairID: UUID?
     @Published var activePairName = ""
     @Published var isPreview = false
+    @Published var syncPreview: SyncPreview?
     @Published var cancelling = false
     @Published var isPaused = false
     @Published var output = ""
@@ -159,6 +160,7 @@ final class AppStore: ObservableObject {
         activePairID = pair.id
         activePairName = pair.name
         isPreview = preview
+        if preview { syncPreview = SyncPreview(pair: pair) }
         cancelling = false
         isPaused = false
         progress = nil
@@ -175,7 +177,12 @@ final class AppStore: ObservableObject {
                     output += chunk.replacingOccurrences(of: "\r", with: "\n")
                     if output.utf8.count > 160_000 { output = String(output.suffix(100_000)) }
                     for line in chunk.components(separatedBy: .newlines) {
-                        if let parsed = TransferProgress.parse(line) { progress = parsed.fraction; progressDetail = parsed.detail }
+                        if line == "Pass 1/2: Source → Destination" || line == "Pass 2/2: Destination → Source" {
+                            progress = nil
+                            progressDetail = preview ? "Comparing locations…" : "Building file list…"
+                        }
+                        let parsed = preview ? TransferProgress.comparison(line) : TransferProgress.parse(line)
+                        if let parsed { progress = parsed.fraction; progressDetail = parsed.detail }
                     }
                 case .finished(let code, let cancelled):
                     finish(pair: pair, started: started, preview: preview, code: code, cancelled: cancelled, logURL: logURL)
@@ -188,6 +195,16 @@ final class AppStore: ObservableObject {
     }
 
     private func finish(pair: SyncPair, started: Date, preview: Bool, code: Int32, cancelled: Bool, logURL: URL) {
+        if preview {
+            do {
+                let log = try String(contentsOf: logURL, encoding: .utf8)
+                syncPreview = SyncPreview(pair: pair, changes: SyncPreview.parse(log, pair: pair),
+                                          complete: true, succeeded: code == 0 && !cancelled)
+            } catch {
+                syncPreview = SyncPreview(pair: pair, complete: true)
+                errorMessage = "Could not read the preview: \(error.localizedDescription)"
+            }
+        }
         let record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path)
         history.insert(record, at: 0)
         history = Array(history.prefix(250))

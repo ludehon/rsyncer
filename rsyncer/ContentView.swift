@@ -2,6 +2,7 @@ import SwiftUI
 
 enum Palette {
     static let green = Color(red: 0.19, green: 0.43, blue: 0.34)
+    static let greenBright = Color(red: 0.29, green: 0.82, blue: 0.60)
     static let sidebar = Color(red: 0.09, green: 0.15, blue: 0.14)
     static let canvas = Color(nsColor: .windowBackgroundColor)
 }

@@ -41,7 +41,18 @@ struct ReorderGestureTests {
         try expect(store.selectedPair?.name == "Second", "Dragging does not change the selected sync")
         let reloaded = AppStore(dataDirectory: directory, enableScheduling: false)
         try expect(reloaded.pairs.map(\.name) == ["First", "Second", "Third"], "Drag order persists across reload")
-        print("All mouse reordering checks passed.")
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.beginSheet(sheet)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        defer { window.endSheet(sheet) }
+        let outside = window.convertPoint(fromScreen: NSPoint(x: sheet.frame.maxX + 20, y: sheet.frame.midY))
+        try expect(SheetOutsideClickDismissal.OutsideClickView.isBackdropClick(in: window, at: outside, sheet: sheet), "Parent backdrop is eligible for dismissal")
+        try expect(!SheetOutsideClickDismissal.OutsideClickView.isBackdropClick(in: sheet, at: NSPoint(x: 100, y: 100), sheet: sheet), "Clicks inside preview details keep the sheet open")
+        let coveredPoint = window.convertPoint(fromScreen: NSPoint(x: sheet.frame.midX, y: sheet.frame.midY))
+        try expect(!SheetOutsideClickDismissal.OutsideClickView.isBackdropClick(in: window, at: coveredPoint, sheet: sheet), "Parent events within the sheet bounds do not dismiss it")
+        let unrelated = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+        try expect(!SheetOutsideClickDismissal.OutsideClickView.isBackdropClick(in: unrelated, at: .zero, sheet: sheet), "Clicks in unrelated windows do not dismiss the sheet")
+        print("All UI checks passed.")
     }
 
     static func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
