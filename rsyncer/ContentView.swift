@@ -20,6 +20,11 @@ struct ContentView: View {
     @State private var dragTranslation: CGFloat = 0
     @GestureState private var reorderGestureActive = false
     private var showVolumes: Bool { store.showingVolumes }
+    private var deleteMenuTitle: AttributedString {
+        var title = AttributedString("Delete…")
+        title.foregroundColor = .red
+        return title
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -80,9 +85,7 @@ struct ContentView: View {
                     .foregroundStyle(Color(red: 0.65, green: 0.85, blue: 0.62))
                 Text("rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
-            Text("A place for everything.")
-                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
-                .padding(.horizontal, 24).padding(.bottom, 38)
+            Spacer().frame(height: 38)
             HStack {
                 Text("SAVED SYNCS").font(.system(size: 10, weight: .semibold)).tracking(1.6)
                 Spacer()
@@ -141,7 +144,13 @@ struct ContentView: View {
                             Button("Move down", systemImage: "arrow.down") { store.movePair(pair.id, by: 1) }
                                 .disabled(store.pairs.last?.id == pair.id)
                             Divider()
-                            Button("Delete…", systemImage: "trash", role: .destructive) { deleteID = pair.id }
+                            Button(role: .destructive) { deleteID = pair.id } label: {
+                                Label {
+                                    Text(deleteMenuTitle)
+                                } icon: {
+                                    Image(systemName: "trash").foregroundStyle(.red)
+                                }
+                            }
                                 .disabled(store.activePairID == pair.id)
                         }
                         .background {
@@ -165,7 +174,6 @@ struct ContentView: View {
                 if !active { finishReordering() }
             }
             Spacer(minLength: 20)
-            SidebarVolumes(monitor: store.volumes) { store.showingVolumes = true }
             Divider().overlay(.white.opacity(0.1)).padding(.horizontal, 24).padding(.vertical, 20)
             Button { showSettings = true } label: {
                 HStack(spacing: 10) {
@@ -240,34 +248,6 @@ struct SyncStatusIcon: View {
                 .rotationEffect(.degrees(active && !paused && !cancelling && !reduceMotion ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5 * 360 : 0))
         }
         .accessibilityLabel(active ? (paused ? "Sync paused" : cancelling ? "Sync stopping" : "Sync running") : "Saved sync")
-    }
-}
-
-struct SidebarVolumes: View {
-    @ObservedObject var monitor: VolumeMonitor
-    var action: () -> Void
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("CONNECTED DRIVES").font(.system(size: 10, weight: .semibold)).tracking(1.3)
-                Spacer()
-                Text("\(monitor.volumes.count)").font(.system(size: 10, design: .monospaced))
-            }.foregroundStyle(.white.opacity(0.45))
-            ForEach(monitor.volumes.prefix(4)) { volume in
-                Button(action: action) {
-                    HStack(spacing: 10) {
-                        Image(systemName: volume.isInternal ? "internaldrive" : "externaldrive").font(.system(size: 17))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(volume.name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            Text(volume.status).font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
-                        }
-                        Spacer(minLength: 0)
-                        Circle().fill(volume.isLow || volume.isReadOnly ? .orange : Color(red: 0.62, green: 0.81, blue: 0.55)).frame(width: 5, height: 5)
-                    }.foregroundStyle(.white.opacity(0.75))
-                }.buttonStyle(.plain)
-            }
-            Button("View all drives", action: action).font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
-        }.padding(.horizontal, 24)
     }
 }
 

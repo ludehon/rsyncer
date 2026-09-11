@@ -27,7 +27,9 @@ Closing the window leaves the menu bar app running. Quitting pauses scheduling; 
 
 ## Volumes, progress and logs
 
-Each selected source and destination shows its volume’s used percentage, storage bar, and free/total capacity. Unavailable locations are identified without showing misleading capacity.
+Click a selected source or destination icon to open that folder in Finder (file sources are revealed in their containing folder). Click the location name to choose another location.
+
+Each selected source and destination shows a storage bar and free/total capacity. Unavailable locations are identified without showing misleading capacity.
 
 Connected drives update after mount, unmount and rename events, and every minute. Indicators report capacity, low space (under 10% free), and read-only status. They do not measure SMART or hardware health; use Disk Utility for diagnostics.
 
@@ -66,4 +68,4 @@ The UI harness sends mouse events to an isolated app window and checks selection
 
 Physical unplug/replug, login after reboot, and macOS privacy prompts should be checked on the target Mac before relying on unattended runs.
 
-Regenerate the geometric app icon with `swift scripts/generate-icon.swift`.
+Regenerate the app icon assets from `artwork/icon.png` with `swift scripts/generate-icon.swift`.

@@ -5,7 +5,6 @@ struct PairDetailView: View {
     @EnvironmentObject private var store: AppStore
     let pairID: UUID
     @State private var tab = DetailTab.options
-    @State private var confirmDelete = false
     @State private var confirmMirror = false
     enum DetailTab: String, CaseIterable { case options = "Options", schedule = "Schedule", activity = "Activity" }
     private var pair: SyncPair { store.pairs.first { $0.id == pairID } ?? SyncPair() }
@@ -14,20 +13,15 @@ struct PairDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             ScrollView {
                 VStack(alignment: .leading, spacing: 25) {
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Your files. In sync.").font(.system(size: 30, weight: .semibold, design: .rounded)).tracking(-0.8)
-                            Text("From one location to another. Just the way you want.")
-                                .font(.system(size: 13)).foregroundStyle(.secondary)
-                        }
-                        Spacer()
                         Label(locked ? (store.isPaused ? "Paused" : "Syncing") : "One-way sync", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "arrow.right")
-                            .font(.system(size: 11, weight: .medium)).foregroundStyle(Palette.green)
-                            .padding(.horizontal, 11).padding(.vertical, 7)
-                            .background(Palette.green.opacity(0.08), in: Capsule())
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.36, green: 0.72, blue: 0.55))
+                            .padding(.horizontal, 13).padding(.vertical, 8)
+                            .background(Palette.green.opacity(0.14), in: Capsule())
+                        Spacer()
                     }
                     HStack(spacing: 14) {
                         LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
@@ -79,26 +73,9 @@ struct PairDetailView: View {
             }
             footer
         }
-        .confirmationDialog("Delete this saved sync?", isPresented: $confirmDelete) {
-            Button("Delete saved sync", role: .destructive) { store.removePair(pairID) }
-        } message: { Text("This removes the saved pair. Files and run logs are kept.") }
         .confirmationDialog("Delete extra destination files?", isPresented: $confirmMirror) {
             Button("Sync and delete extra files", role: .destructive) { store.start(pair, preview: false); tab = .activity }
         } message: { Text("Files in \(pair.destination) that do not exist in the source may be permanently deleted. Run a preview first to review the changes.") }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "folder").foregroundStyle(.secondary)
-            TextField("Sync name", text: binding.name).textFieldStyle(.plain).font(.system(size: 13, weight: .medium)).disabled(locked)
-            Spacer()
-            if let last = pair.lastRun { Text("Last run \(last.formatted(.relative(presentation: .named)))").font(.system(size: 11)).foregroundStyle(.secondary) }
-            Menu {
-                Button("Open log folder", action: store.revealLogs)
-                Button("Delete saved sync…", role: .destructive) { confirmDelete = true }.disabled(locked)
-            } label: { Image(systemName: "ellipsis").frame(width: 22) }.menuStyle(.borderlessButton).fixedSize()
-        }.padding(.horizontal, 32).padding(.vertical, 20)
-            .overlay(alignment: .bottom) { Divider() }
     }
 
     private var footer: some View {
@@ -117,6 +94,10 @@ struct PairDetailView: View {
                 }
             }
             HStack {
+                Button(action: store.revealLogs) {
+                    Label("View logs", systemImage: "doc.text")
+                }
+                .controlSize(.large)
                 VStack(alignment: .leading, spacing: 4) {
                     Label(locked ? (store.isPaused ? "Sync paused" : store.isPreview ? "Previewing changes" : "Sync in progress") : pair.isConfigured ? "Ready when you are" : "Choose your locations", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "checkmark.circle")
                         .font(.system(size: 12, weight: .medium))
@@ -157,18 +138,37 @@ struct LocationCard: View {
                 Spacer()
                 Image(systemName: source ? "arrow.up.right" : "arrow.down.right").font(.system(size: 12)).foregroundStyle(.tertiary)
             }
-            Button { store.chooseLocation(source: source, pairID: pairID) } label: {
-                VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    if path.isEmpty {
+                        store.chooseLocation(source: source, pairID: pairID)
+                    } else {
+                        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == false {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        } else if !NSWorkspace.shared.open(url) {
+                            store.errorMessage = "Could not open \(path) in Finder."
+                        }
+                    }
+                } label: {
                     Image(systemName: source ? "folder.fill" : "externaldrive.fill")
                         .font(.system(size: 36, weight: .light)).symbolRenderingMode(.hierarchical)
                         .foregroundStyle(source ? Palette.green : Color(red: 0.65, green: 0.48, blue: 0.26))
                         .frame(height: 42)
-                    Text(path.isEmpty ? (source ? "Drop a file or folder" : "Drop a folder here") : URL(fileURLWithPath: path).lastPathComponent)
-                        .font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                    Text(path.isEmpty ? subtitle : "Click to choose another location")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+                }.buttonStyle(.plain)
+                    .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
+                    .help(path.isEmpty ? "Choose a location" : "Open in Finder")
+                Button { store.chooseLocation(source: source, pairID: pairID) } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(path.isEmpty ? (source ? "Drop a file or folder" : "Drop a folder here") : URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        if path.isEmpty {
+                            Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .help("Choose a location")
+            }
             HStack(spacing: 5) {
                 Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(.tertiary)
                 TextField("Or type an absolute path…", text: $path).textFieldStyle(.plain)
@@ -199,14 +199,6 @@ struct LocationStorageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let volume = monitor.volume(for: path) {
-                HStack {
-                    Text(volume.name).lineLimit(1)
-                    Spacer()
-                    if volume.total > 0 {
-                        Text("\(volume.usedFraction.formatted(.percent.precision(.fractionLength(0)))) used")
-                            .monospacedDigit().fixedSize()
-                    }
-                }.font(.system(size: 10, weight: .medium))
                 if volume.total > 0 {
                     ProgressView(value: volume.usedFraction)
                         .tint(volume.isLow ? .orange : Palette.green)
