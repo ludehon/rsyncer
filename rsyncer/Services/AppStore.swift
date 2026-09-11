@@ -4,6 +4,8 @@ import ServiceManagement
 
 @MainActor
 final class AppStore: ObservableObject {
+    private static let hideDockIconWhenClosedKey = "hideDockIconWhenClosed"
+
     @Published var pairs: [SyncPair] = []
     @Published var history: [RunRecord] = []
     @Published var selectedID: UUID?
@@ -30,6 +32,11 @@ final class AppStore: ObservableObject {
     @Published var changesSaved = true
     @Published var scheduleStatus: [UUID: String] = [:]
     @Published var theme = AppTheme.current { didSet { AppTheme.current = theme } }
+    @Published var hideDockIconWhenClosed = UserDefaults.standard.object(forKey: hideDockIconWhenClosedKey) == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: hideDockIconWhenClosedKey) {
+        didSet { UserDefaults.standard.set(hideDockIconWhenClosed, forKey: Self.hideDockIconWhenClosedKey) }
+    }
     let volumes = VolumeMonitor()
     let dataDirectory: URL
     let logsDirectory: URL

@@ -4,10 +4,15 @@ import ServiceManagement
 struct AppSettingsView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack {
-                Text("Make yourself at home").font(.system(size: 23, weight: .semibold, design: .rounded))
+                Text("Settings").font(.system(size: 23, weight: .semibold, design: .rounded))
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
@@ -15,7 +20,11 @@ struct AppSettingsView: View {
             if store.loginNeedsApproval {
                 Button("Allow rsyncer in Login Items…") { SMAppService.openSystemSettingsLoginItems() }
             }
-            Text("Closing the window keeps rsyncer in your menu bar, ready for scheduled syncs. Choose Quit rsyncer to stop the app.")
+            Toggle("Hide the Dock icon when the main window closes", isOn: $store.hideDockIconWhenClosed)
+                .toggleStyle(.switch)
+            Text(store.hideDockIconWhenClosed
+                 ? "Closing the window leaves rsyncer running only in the menu bar. Open it there to restore the window and Dock icon."
+                 : "Closing the window keeps rsyncer in your menu bar and Dock, ready for scheduled syncs. Choose Quit rsyncer to stop the app.")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
@@ -34,6 +43,10 @@ struct AppSettingsView: View {
             Divider()
             LabeledContent("Sync engine", value: RsyncCommand.executable)
             LabeledContent("Saved history", value: "Latest 250 runs")
+            LabeledContent("Version", value: appVersion)
+            LabeledContent("Source code") {
+                Link("github.com/ludehon/rsyncer", destination: URL(string: "https://github.com/ludehon/rsyncer")!)
+            }
             HStack {
                 Text("Logs are retained until you remove them.").font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer()

@@ -94,14 +94,6 @@ struct PairDetailView: View {
                 }
             }
             HStack {
-                Button(action: store.revealLogs) {
-                    Label("View logs", systemImage: "doc.text")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.accentBright)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .controlSize(.large)
                 Spacer()
                 if locked {
                     Button(action: store.togglePause) {
