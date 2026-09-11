@@ -1,9 +1,11 @@
-// Rebuild the app icon from artwork/icon.png: swift scripts/generate-icon.swift
+// Rebuild the app icon: python3 scripts/normalize-icon.py && swift scripts/generate-icon.swift
+// Reads the normalised artwork, not artwork/icon.png directly -- see normalize-icon.py
+// for why the raw artwork's shape has to be squared off first.
 import AppKit
 
 let destination = URL(fileURLWithPath: "rsyncer/Assets.xcassets/AppIcon.appiconset")
-guard let source = NSImage(contentsOfFile: "artwork/icon.png") else {
-    fatalError("Could not load artwork/icon.png; run this script from the repository root")
+guard let source = NSImage(contentsOfFile: "artwork/icon-normalized.png") else {
+    fatalError("Could not load artwork/icon-normalized.png; run scripts/normalize-icon.py from the repository root first")
 }
 var entries: [[String: String]] = []
 for pointSize in [16, 32, 128, 256, 512] {

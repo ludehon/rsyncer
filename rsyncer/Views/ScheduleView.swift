@@ -30,11 +30,11 @@ struct ScheduleView: View {
             }
             if let next = pair.nextRun {
                 Label("Next run: \(next.formatted(date: .abbreviated, time: .shortened))", systemImage: "clock")
-                    .font(.system(size: 12)).foregroundStyle(Palette.green)
+                    .font(.system(size: 12)).foregroundStyle(Palette.accent)
             }
             if pair.schedule.kind == .onMount {
                 Label("Runs when either saved location’s drive connects and both locations are available.", systemImage: "externaldrive.badge.plus")
-                    .font(.system(size: 12)).foregroundStyle(Palette.green)
+                    .font(.system(size: 12)).foregroundStyle(Palette.accent)
             }
             if let status = store.scheduleStatus[pair.id] {
                 Label("Waiting: \(status)", systemImage: "clock.badge.exclamationmark").font(.system(size: 11)).foregroundStyle(.orange)
@@ -45,7 +45,7 @@ struct ScheduleView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Toggle("Launch rsyncer at login", isOn: Binding(get: { store.loginEnabled }, set: store.setLoginEnabled))
                     .toggleStyle(.switch).controlSize(.small).font(.system(size: 12))
-            }.padding(18).background(Palette.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            }.padding(18).cardSurface(radius: 10, fill: Palette.accent.opacity(0.07), stroke: Palette.accent.opacity(0.2))
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }

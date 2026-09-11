@@ -136,13 +136,12 @@ private struct OptionsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             Label(title, systemImage: symbol)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Palette.green)
+                .foregroundStyle(Palette.accent)
             VStack(alignment: .leading, spacing: 12) { content }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.primary.opacity(0.08)) }
+        .cardSurface()
     }
 }
 
@@ -162,7 +161,7 @@ struct OptionRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .toggleStyle(.switch).controlSize(.small)
-        .tint(destructive ? .orange : Palette.green)
+        .tint(destructive ? .orange : Palette.accent)
         .accessibilityLabel(title)
         .accessibilityHint(detail)
     }

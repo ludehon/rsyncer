@@ -48,8 +48,9 @@ struct SyncPreviewView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                     Text(metrics.sizeLabel).font(.system(size: 13, weight: .medium))
                                 }.foregroundStyle(cardTextColor(kind)).padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(color(kind).opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                                     .contentShape(Rectangle())
+                                    .cardSurface(radius: 10, fill: color(kind).opacity(colorScheme == .dark ? 0.14 : 0.09),
+                                                 stroke: color(kind).opacity(colorScheme == .dark ? 0.3 : 0.22))
                             }.buttonStyle(.plain).help("View \(kind.rawValue.lowercased()) items")
                         }
                     }.frame(maxWidth: 820)
@@ -106,7 +107,7 @@ struct SyncPreviewView: View {
                 let metrics = PreviewMetrics(changes)
                 Button { openDetails(target: target) } label: {
                     HStack(spacing: 16) {
-                        Image(systemName: "externaldrive.fill").font(.system(size: 28)).foregroundStyle(Palette.green)
+                        Image(systemName: "externaldrive.fill").font(.system(size: 28)).foregroundStyle(Palette.accent)
                         VStack(alignment: .leading, spacing: 7) {
                             Text(URL(fileURLWithPath: target).lastPathComponent).font(.system(size: 14, weight: .semibold))
                             Text(target).font(.system(size: 10)).foregroundStyle(.secondary)
@@ -127,11 +128,11 @@ struct SyncPreviewView: View {
                         Spacer(minLength: 8)
                         VStack(alignment: .trailing, spacing: 7) {
                             Text(metrics.sizeLabel).font(.system(size: 16, weight: .semibold))
-                            Text("View details →").font(.system(size: 10)).foregroundStyle(Palette.green)
+                            Text("View details →").font(.system(size: 10)).foregroundStyle(Palette.accent)
                         }
                     }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
                         .contentShape(Rectangle())
+                        .cardSurface(radius: 10)
                 }.buttonStyle(.plain)
             }
         }.frame(maxWidth: 820)
@@ -197,17 +198,17 @@ struct SyncPreviewView: View {
             VStack(spacing: 7) {
                 Text(preview.complete ? metrics.sizeLabel : "Comparing…")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Palette.greenBright)
+                    .foregroundStyle(Palette.accentBright)
                     .multilineTextAlignment(.center)
                 HStack(spacing: 0) {
-                    Circle().fill(Palette.greenBright.opacity(0.5)).frame(width: 6, height: 6)
-                    Capsule().fill(LinearGradient(colors: [Palette.greenBright.opacity(0.45), Palette.greenBright],
+                    Circle().fill(Palette.accentBright.opacity(0.5)).frame(width: 6, height: 6)
+                    Capsule().fill(LinearGradient(colors: [Palette.accentBright.opacity(0.45), Palette.accentBright],
                                                   startPoint: .leading, endPoint: .trailing))
                         .frame(height: 3)
                     Image(systemName: "arrowtriangle.right.fill")
-                        .font(.system(size: 13)).foregroundStyle(Palette.greenBright).offset(x: -1)
+                        .font(.system(size: 13)).foregroundStyle(Palette.accentBright).offset(x: -1)
                 }.frame(maxWidth: .infinity).frame(height: 16)
-                    .shadow(color: Palette.greenBright.opacity(0.45), radius: 5)
+                    .shadow(color: Palette.accentBright.opacity(0.45), radius: 5)
                     .accessibilityLabel("To")
                 Text(preview.complete ? (preview.succeeded ? "Planned file contents" : "Partial file contents") : "Calculating size")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
@@ -217,8 +218,7 @@ struct SyncPreviewView: View {
             endpoint(destination, title: "TO", destination: true)
         }
         .padding(18)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 15))
-        .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(Palette.green.opacity(0.15)) }
+        .cardSurface(radius: 15)
     }
 
     private func endpoint(_ path: String, title: String, destination: Bool) -> some View {
@@ -226,13 +226,13 @@ struct SyncPreviewView: View {
             Image(systemName: destination ? "externaldrive.fill" : "folder.fill")
                 .font(.system(size: 26, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(destination ? Palette.green : Color.blue)
+                .foregroundStyle(destination ? Palette.accent : Color.blue)
                 .frame(width: 46, height: 46)
-                .background((destination ? Palette.green : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background((destination ? Palette.accent : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: destination ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(destination ? Palette.green : Color.blue)
+                        .foregroundStyle(destination ? Palette.accent : Color.blue)
                         .background(.background, in: Circle()).offset(x: 3, y: 3)
                 }
             VStack(alignment: .leading, spacing: 5) {
@@ -247,14 +247,14 @@ struct SyncPreviewView: View {
 
     private func status(_ title: String, detail: String, icon: String) -> some View {
         VStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 30)).foregroundStyle(Palette.green)
+            Image(systemName: icon).font(.system(size: 30)).foregroundStyle(Palette.accent)
             Text(title).font(.system(size: 14, weight: .semibold))
             Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity).padding(.vertical, 30)
     }
 
     private func color(_ kind: PreviewChange.Kind) -> Color {
-        switch kind { case .added: Palette.green; case .updated: .blue; case .deleted: .red }
+        switch kind { case .added: Palette.accent; case .updated: .blue; case .deleted: .red }
     }
 
     private func cardTextColor(_ kind: PreviewChange.Kind) -> Color {

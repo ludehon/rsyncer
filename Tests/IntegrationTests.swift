@@ -23,13 +23,13 @@ struct IntegrationTests {
             do { try RsyncCommand.validate(pair) } catch { print("PASS: \(message)"); return }
             throw SyncError.invalid("FAIL: \(message)")
         }
-        func run(_ pair: SyncPair, preview: Bool = false, worker: RsyncRunner = RsyncRunner()) async throws -> (Int32, Bool, String) {
+        func run(_ pair: SyncPair, preview: Bool = false, worker: RsyncRunner = RsyncRunner(), onOutput: ((String) -> Void)? = nil) async throws -> (Int32, Bool, String) {
             let logURL = root.appendingPathComponent("\(UUID()).log")
             var result: (Int32, Bool)?
             var output = ""
             for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: "Integration test\n") {
                 switch event {
-                case .output(let text): output += text
+                case .output(let text): output += text; onOutput?(text)
                 case .finished(let code, let cancelled): result = (code, cancelled)
                 case .failed(let error): throw SyncError.invalid(error)
                 }
@@ -39,7 +39,8 @@ struct IntegrationTests {
             let log = try Data(contentsOf: logURL)
             // Compare bytes: a trailing CR merges with the footer’s LF into one
             // Swift Character, so String.contains can reject matching output.
-            try expect(output.isEmpty || log.range(of: Data(output.utf8)) != nil, "Full process output reaches log")
+            try expect(output.isEmpty || log.range(of: RsyncOutput.strippingDebugLines(Data(output.utf8))) != nil, "Full process output reaches log")
+            try expect(log.range(of: Data("): : ".utf8)) == nil, "Run logs omit rsync diagnostics")
             return (result.0, result.1, output)
         }
 
@@ -184,7 +185,33 @@ struct IntegrationTests {
         try expect(TransferProgress.comparison("0 0% 00:00:00") == nil, "Dry-run byte percentage without counts is ignored")
         try expect(TransferProgress.comparison("RSYNCER2|>f+++++++|0|to-check=0/100") == nil, "Filenames cannot spoof comparison progress")
         try expect(TransferProgress.parse("file.txt") == nil, "Non-progress output ignored")
+        let fileList = FileListProgress.parse("Transfer starting: 18,319 files")
+        try expect(fileList?.count == 18319 && fileList?.complete == true, "Openrsync file-list total includes files and folders")
+        try expect(FileListProgress.parse("  1200 files...")?.complete == false, "Intermediate scan counts stay indeterminate")
+        try expect(FileListProgress.parse("building file list ... 100 files...")?.count == 100, "Initial legacy scan count parsed")
+        try expect(FileListProgress.parse("1 file to consider")?.complete == true, "Legacy scan completion parsed")
+        try expect(FileListProgress.parse("RSYNCER2|>f+++++++|0|Transfer starting: 100 files") == nil, "Itemized filenames cannot spoof scan counts")
+        try expect(FileListProgress.parse("Transfer starting: -1 files") == nil, "Invalid scan counts ignored")
         try expect(TransferProgress.parse("report 42%.txt") == nil, "Percent signs in filenames are not treated as progress")
+        try expect(ProcessedItem.parse(".f        jpg_ams/DSC00596.jpg") == ProcessedItem(path: "jpg_ams/DSC00596.jpg"), "Openrsync up-to-date entries count as checked items")
+        try expect(ProcessedItem.parse("rsync(4242): : sub/same.txt: skipping: up to date") == ProcessedItem(path: "sub/same.txt"), "Receiver diagnostics report each unchanged file as it is examined")
+        try expect(ProcessedItem.parse("rsync(4242): : newfile.txt: not mapped") == ProcessedItem(path: "newfile.txt"), "Receiver diagnostics report files that will be copied")
+        try expect(ProcessedItem.parse("rsync(4242): : BIRDS/RAW: updating directory") == ProcessedItem.parse(".d..t.... BIRDS/RAW/"), "Directories compare equal whether reported by the receiver or itemized")
+        try expect(ProcessedItem.parse("rsync(4242): : .: updating directory") == ProcessedItem.parse(".d        ./"), "The destination root compares equal in both reports")
+        try expect(ProcessedItem.parse(">f..t.... newer.txt")?.path == "newer.txt", "Transferred files are recognised")
+        try expect(ProcessedItem.parse(".f...p..... a  b.txt")?.path == "a  b.txt", "Standard rsync itemized entries keep their full path")
+        try expect(ProcessedItem.parse("Skip newer 'to sort/DSC01475.tif'")?.path == "to sort/DSC01475.tif", "Files skipped for being newer count as checked items")
+        try expect(ProcessedItem.parse("rsync(4242): : src/big.bin: read block prologue: 0 blocks") == nil && ProcessedItem.parse("rsync(4242): : downloader: phase complete") == nil, "Other diagnostics are not items")
+        try expect(ProcessedItem.parse("*deleting old.txt") == nil, "Deletions are not counted as checked items")
+        try expect(ProcessedItem.parse("RSYNCER2|>f+++++++|0|x") == nil && ProcessedItem.parse("Transfer starting: 10 files") == nil, "Preview and scan lines are not items")
+        try expect(ProcessedItem.parse("     1,024  42%  1.2MB/s 0:00:03") == nil && ProcessedItem.parse("sent 9865 bytes  received 1394 bytes") == nil, "Progress and summary lines are not items")
+        try expect(ProcessedItem.parse(".f        ") == nil && ProcessedItem.parse("Skip newer ''") == nil && ProcessedItem.parse("rsync(1): : : skipping: up to date") == nil, "Entries without a path are ignored")
+        try expect(RsyncOutput.isDebugLine("rsync(4242): : a: skipping: up to date") && !RsyncOutput.isDebugLine("rsync(4242): error: boom") && !RsyncOutput.isDebugLine("rsync(4242): warning: hmm"), "Only diagnostics are treated as debug output")
+        let noisy = Data("Transfer starting: 3 files\r\nrsync(1): : a: skipping: up to date\r\n>f+++++++ b\nrsync(1): error: boom\nrsync(1): : tail".utf8)
+        try expect(String(decoding: RsyncOutput.strippingDebugLines(noisy), as: UTF8.self) == "Transfer starting: 3 files\r\n>f+++++++ b\nrsync(1): error: boom\n", "Run logs drop diagnostics but keep output, errors, and line endings")
+        try expect(RsyncOutput.strippingDebugLines(Data("plain\n".utf8).dropFirst(0)).count == 6, "Stripping keeps ordinary output unchanged")
+        try expect(RsyncCommand.arguments(for: pair, preview: false).filter { $0 == "--verbose" }.count == 3, "Sync asks the receiver to report each entry so checking progress is visible")
+        try expect(RsyncCommand.arguments(for: pair, preview: true).filter { $0 == "--verbose" }.count == 1, "Preview keeps the quieter log its parser expects")
 
         let cancelWorker = RsyncRunner()
         cancelWorker.cancel()
@@ -194,6 +221,9 @@ struct IntegrationTests {
         pair.options.bandwidthLimit = 512
         pair.options.compress = false
         let activeWorker = RsyncRunner()
+        var sawLiveFileList = false
+        var sawLivePercentage = false
+        var sawProcessedItem = false
         let cancelTask = Task {
             defer { activeWorker.cancel() }
             try await Task.sleep(for: .milliseconds(400))
@@ -209,9 +239,17 @@ struct IntegrationTests {
             try expect(activeWorker.resume(), "Paused transfer can resume")
             try await Task.sleep(for: .seconds(2))
             try expect(destinationBytes() > pausedBytes, "Resumed transfer continues writing")
+            try expect(sawLiveFileList && sawLivePercentage, "File-list total and percentage arrive while the transfer is still running")
+            try expect(sawProcessedItem, "Checked entries are itemized while the transfer is still running")
             try expect(activeWorker.pause(), "Resumed transfer can pause again before cancellation")
         }
-        result = try await run(pair, worker: activeWorker)
+        result = try await run(pair, worker: activeWorker) { chunk in
+            for line in chunk.components(separatedBy: .newlines) {
+                if FileListProgress.parse(line)?.complete == true { sawLiveFileList = true }
+                if TransferProgress.parse(line) != nil { sawLivePercentage = true }
+                if ProcessedItem.parse(line) != nil { sawProcessedItem = true }
+            }
+        }
         _ = try await cancelTask.value
         try expect(result.1 && result.0 != 0, "Cancelling a paused transfer terminates the child")
         pair.options.bandwidthLimit = 0

@@ -23,7 +23,7 @@ struct rsyncerApp: App {
     @StateObject private var store = AppStore()
 
     var body: some Scene {
-        Window("rsyncer", id: "main") {
+        Window("Rsyncer", id: "main") {
             ContentView().environmentObject(store)
                 .onAppear { delegate.store = store; store.tick() }
         }
@@ -46,7 +46,7 @@ struct rsyncerApp: App {
             MenuBarView().environmentObject(store)
         } label: {
             Image(systemName: store.isRunning ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
-                .accessibilityLabel("rsyncer")
+                .accessibilityLabel("Rsyncer")
         }
     }
 }

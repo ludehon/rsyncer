@@ -87,6 +87,12 @@ enum RsyncCommand {
             o.deleteExtraneous = false
         }
         var args = ["--recursive", "--verbose", "--itemize-changes", "--progress", "--stats"]
+        // openrsync refreshes every already-synced file's timestamp on the destination
+        // before it copies anything, which is slow on FUSE and network volumes and
+        // passes in silence at -v. At -vvv its receiver reports each entry as it is
+        // examined. Those diagnostics are parsed for progress and kept out of the log.
+        // The preview log keeps only genuine changes for its parser.
+        if !preview { args += ["--verbose", "--verbose"] }
         let flags: [(Bool, String)] = [
             (o.preserveTimes, "--times"), (o.preservePermissions, "--perms"),
             // Apple's openrsync can fail finalizing AppleDouble files with -E --dry-run.
@@ -130,6 +136,104 @@ enum RsyncCommand {
             "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
         }.joined(separator: "\n")
+    }
+}
+
+struct FileListProgress {
+    let count: Int
+    let complete: Bool
+
+    static func parse(_ line: String) -> FileListProgress? {
+        let text = line.trimmingCharacters(in: .whitespaces)
+        // openrsync reports its total after scanning; older rsync can also
+        // emit intermediate counts. These totals include directories.
+        let patterns = [
+            (#"^Transfer starting: ([0-9,]+) files?$"#, true),
+            (#"^([0-9,]+) files? to consider$"#, true),
+            (#"^(?:building file list \.\.\.\s*)?([0-9,]+) files\.\.\.$"#, false)
+        ]
+        for (pattern, complete) in patterns {
+            guard let match = text.range(of: pattern, options: .regularExpression),
+                  let digits = text[match].range(of: #"[0-9][0-9,]*"#, options: .regularExpression),
+                  let count = Int(text[digits].replacingOccurrences(of: ",", with: "")) else { continue }
+            return FileListProgress(count: count, complete: complete)
+        }
+        return nil
+    }
+}
+
+/// Diagnostics openrsync prints at -vv and above, prefixed "rsync(<pid>): : ".
+/// Errors and warnings use "rsync(<pid>): error" or "warning" and are never dropped.
+enum RsyncOutput {
+    static func debugMessage(_ line: String) -> Substring? {
+        guard let range = line.range(of: #"^rsync\(\d+\): : "#, options: .regularExpression) else { return nil }
+        return line[range.upperBound...]
+    }
+
+    static func isDebugLine(_ line: String) -> Bool { debugMessage(line) != nil }
+
+    /// Removes diagnostic lines, keeping every other byte and line ending intact.
+    static func strippingDebugLines(_ data: Data) -> Data {
+        var kept = Data(capacity: data.count)
+        var start = data.startIndex
+        while start < data.endIndex {
+            var end = start
+            while end < data.endIndex, data[end] != 10, data[end] != 13 { end += 1 }
+            var next = end
+            if next < data.endIndex {
+                next += 1
+                if data[end] == 13, next < data.endIndex, data[next] == 10 { next += 1 }
+            }
+            if !hasDebugPrefix(data, from: start, to: end) { kept.append(data[start..<next]) }
+            start = next
+        }
+        return kept
+    }
+
+    private static func hasDebugPrefix(_ data: Data, from start: Data.Index, to end: Data.Index) -> Bool {
+        var index = start
+        for byte in "rsync(".utf8 {
+            guard index < end, data[index] == byte else { return false }
+            index += 1
+        }
+        var digits = 0
+        while index < end, (48...57).contains(data[index]) { index += 1; digits += 1 }
+        guard digits > 0 else { return false }
+        for byte in "): : ".utf8 {
+            guard index < end, data[index] == byte else { return false }
+            index += 1
+        }
+        return true
+    }
+}
+
+/// One entry rsync has examined, from whichever line reports it first: the
+/// receiver's per-entry diagnostics at -vvv, an openrsync "Skip newer" notice,
+/// or an itemized line. Paths are normalized so the same entry compares equal
+/// however it was reported.
+struct ProcessedItem: Equatable {
+    let path: String
+
+    static func parse(_ line: String) -> ProcessedItem? {
+        if line.hasPrefix("Skip newer '"), line.hasSuffix("'"), line.count > 13 {
+            return ProcessedItem(path: normalize(line.dropFirst(12).dropLast()))
+        }
+        if let message = RsyncOutput.debugMessage(line) {
+            for suffix in [": skipping: up to date", ": updating directory", ": not mapped"] where message.hasSuffix(suffix) {
+                let path = message.dropLast(suffix.count)
+                return path.isEmpty ? nil : ProcessedItem(path: normalize(path))
+            }
+            return nil
+        }
+        // Itemized lines start with the change type and file type followed by
+        // attribute flags: ".f        name" from openrsync, ".f...p....." from
+        // rsync 3. "*deleting" messages are not entries being checked.
+        guard let range = line.range(of: #"^[<>ch.][fdLDS][ .+?a-z]{7,9}\s+(?=\S)"#, options: .regularExpression) else { return nil }
+        return ProcessedItem(path: normalize(line[range.upperBound...]))
+    }
+
+    private static func normalize(_ path: Substring) -> String {
+        path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : String(path)
     }
 }
 

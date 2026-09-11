@@ -14,51 +14,55 @@ struct PairDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 25) {
-                    HStack(alignment: .center, spacing: 12) {
-                        Label(locked ? (store.isPaused ? "Paused" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color(red: 0.36, green: 0.72, blue: 0.55))
-                            .padding(.horizontal, 13).padding(.vertical, 8)
-                            .background(Palette.green.opacity(0.14), in: Capsule())
-                            .contentShape(Capsule())
-                            .onHover { hoveringMode = $0 }
-                            .popover(isPresented: $hoveringMode, arrowEdge: .bottom) {
-                                Text(pair.direction == .oneWay
-                                     ? "Folder contents are copied into the destination. Your source stays intact."
-                                     : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
-                                    .font(.system(size: 11))
-                                    .frame(maxWidth: 260, alignment: .leading)
-                                    .padding(12)
-                            }
-                        Spacer()
-                    }
-                    HStack(spacing: 14) {
-                        LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
-                        LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
-                    }.disabled(locked)
-                    VStack(spacing: 0) {
-                        HStack(spacing: 16) {
-                            DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
-                            Spacer(minLength: 0)
-                            if !store.changesSaved {
-                                Text("NOT SAVED")
-                                    .font(.system(size: 9, weight: .medium)).tracking(1.2)
-                                    .foregroundStyle(.orange)
-                            }
+            // The header stays put; only the selected tab’s contents scroll.
+            VStack(alignment: .leading, spacing: 25) {
+                HStack(alignment: .center, spacing: 12) {
+                    Label(locked ? (store.isPaused ? "Paused" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Palette.accent)
+                        .padding(.horizontal, 13).padding(.vertical, 8)
+                        .background(Palette.accent.opacity(0.14), in: Capsule())
+                        .contentShape(Capsule())
+                        .onHover { hoveringMode = $0 }
+                        .popover(isPresented: $hoveringMode, arrowEdge: .bottom) {
+                            Text(pair.direction == .oneWay
+                                 ? "Folder contents are copied into the destination. Your source stays intact."
+                                 : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
+                                .font(.system(size: 11))
+                                .frame(maxWidth: 260, alignment: .leading)
+                                .padding(12)
                         }
-                        Group {
-                            switch tab {
-                            case .options: SyncOptionsView(options: binding.options, twoWay: pair.direction == .twoWay).disabled(locked)
-                            case .schedule: ScheduleView(pair: binding).disabled(locked)
-                            case .activity: ActivityView(pairID: pairID)
-                            case .preview: SyncPreviewView(pairID: pairID)
-                            }
-                        }.padding(.top, 22)
+                    Spacer()
+                }
+                HStack(spacing: 14) {
+                    LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
+                    LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
+                }.disabled(locked)
+                HStack(spacing: 16) {
+                    DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
+                    Spacer(minLength: 0)
+                    if !store.changesSaved {
+                        Text("NOT SAVED")
+                            .font(.system(size: 9, weight: .medium)).tracking(1.2)
+                            .foregroundStyle(.orange)
                     }
-                }.padding(32)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 32).padding(.top, 12)
+            ScrollView {
+                Group {
+                    switch tab {
+                    case .options: SyncOptionsView(options: binding.options, twoWay: pair.direction == .twoWay).disabled(locked)
+                    case .schedule: ScheduleView(pair: binding).disabled(locked)
+                    case .activity: ActivityView(pairID: pairID)
+                    case .preview: SyncPreviewView(pairID: pairID)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 32).padding(.top, 22).padding(.bottom, 32)
+            }
+            .scrollBounceBehavior(.basedOnSize)
             footer
         }
         .confirmationDialog("Delete extra destination files?", isPresented: $confirmMirror) {
@@ -68,10 +72,10 @@ struct PairDetailView: View {
 
     private var footer: some View {
         VStack(spacing: 13) {
-            if locked {
+            if locked && tab != .activity {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
-                        Text(store.isPreview ? (pair.direction == .twoWay ? "Comparing files · current direction" : "Comparing files") : "Current file progress").font(.system(size: 11, weight: .medium))
+                        Text(store.isPreview ? (pair.direction == .twoWay ? "Comparing files · current direction" : "Comparing files") : store.isTransferring ? "Syncing files" : "Checking files").font(.system(size: 11, weight: .medium))
                         Spacer()
                         if let progress = store.progress { Text(progress, format: .percent.precision(.fractionLength(0))).font(.system(size: 11, design: .monospaced)) }
                     }
@@ -85,24 +89,45 @@ struct PairDetailView: View {
                 Button(action: store.revealLogs) {
                     Label("View logs", systemImage: "doc.text")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.greenBright)
+                        .foregroundStyle(Palette.accentBright)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .controlSize(.large)
                 Spacer()
                 if locked {
-                    Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling).controlSize(.large)
-                    Button(store.cancelling ? "Stopping…" : "Stop sync", role: .destructive, action: store.cancel).disabled(store.cancelling).controlSize(.large)
+                    Button(action: store.togglePause) {
+                        Label(store.isPaused ? "Resume sync" : "Pause sync", systemImage: store.isPaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.accentBright)
+                            .padding(.horizontal, 18).frame(height: 30)
+                            .background(Palette.accentBright.opacity(0.12), in: Capsule())
+                            .overlay { Capsule().strokeBorder(Palette.accentBright.opacity(0.85), lineWidth: 1) }
+                            .contentShape(Capsule())
+                    }
+                        .buttonStyle(.plain)
+                        .opacity(store.cancelling ? 0.4 : 1)
+                        .disabled(store.cancelling)
+                    Button(action: store.cancel) {
+                        Label(store.cancelling ? "Stopping…" : "Stop sync", systemImage: "stop.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 18).frame(height: 30)
+                            .background(Color.red, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                        .buttonStyle(.plain)
+                        .opacity(store.cancelling ? 0.4 : 1)
+                        .disabled(store.cancelling)
                 } else {
                     Button { store.start(pair, preview: true); tab = .preview } label: {
                         Label("Preview", systemImage: "eye")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Palette.greenBright)
+                            .foregroundStyle(Palette.accentBright)
                             .padding(.horizontal, 18).frame(height: 30)
-                            .background(Palette.greenBright.opacity(0.12), in: Capsule())
+                            .background(Palette.accentBright.opacity(0.12), in: Capsule())
                             .overlay {
-                                Capsule().strokeBorder(Palette.greenBright.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                                Capsule().strokeBorder(Palette.accentBright.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
                             }
                             .contentShape(Capsule())
                     }
@@ -117,7 +142,7 @@ struct PairDetailView: View {
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 24).frame(height: 30)
-                            .background(Palette.green, in: Capsule())
+                            .background(Palette.accent, in: Capsule())
                             .contentShape(Capsule())
                     }
                         .buttonStyle(.plain)
@@ -180,7 +205,7 @@ struct LocationCard: View {
                 } label: {
                     Image(systemName: source ? "folder.fill" : "externaldrive.fill")
                         .font(.system(size: 36, weight: .light)).symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(source ? Palette.green : Color(red: 0.65, green: 0.48, blue: 0.26))
+                        .foregroundStyle(source ? Palette.accent : Color(red: 0.65, green: 0.48, blue: 0.26))
                         .frame(height: 42)
                 }.buttonStyle(.plain)
                     .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
@@ -201,12 +226,12 @@ struct LocationCard: View {
                 TextField("Or type an absolute path…", text: $path).textFieldStyle(.plain)
                     .font(.system(size: 10, design: .monospaced)).lineLimit(1)
                     .accessibilityLabel(source ? "Source path" : "Destination path")
-            }.padding(9).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 5))
+            }.padding(9).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 5))
             if !path.isEmpty { LocationStorageView(monitor: store.volumes, path: path) }
         }
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .background(targeted ? Palette.green.opacity(0.08) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
-        .overlay { RoundedRectangle(cornerRadius: 13).strokeBorder(targeted ? Palette.green : Color.primary.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: path.isEmpty ? [5, 4] : [])) }
+        .cardSurface(radius: 13, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
+                     stroke: targeted ? Palette.accent : Palette.cardStroke, dash: path.isEmpty ? [5, 4] : [])
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first, urls.count == 1, url.isFileURL else { return false }
             if !source {
@@ -228,7 +253,7 @@ struct LocationStorageView: View {
             if let volume = monitor.volume(for: path) {
                 if volume.total > 0 {
                     ProgressView(value: volume.usedFraction)
-                        .tint(volume.isLow ? .orange : Palette.green)
+                        .tint(volume.isLow ? .orange : Palette.accent)
                         .accessibilityLabel("\(volume.name) storage used")
                         .accessibilityValue(volume.usedFraction.formatted(.percent.precision(.fractionLength(0))))
                 }

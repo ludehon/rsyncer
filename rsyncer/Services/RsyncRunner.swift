@@ -7,6 +7,43 @@ enum RunEvent: Sendable {
     case failed(String)
 }
 
+/// A terminal makes rsync flush status lines as it does in Terminal, including
+/// the file-list heading before a slow destination metadata pass.
+private final class RsyncOutputTerminal {
+    let reader: FileHandle
+    let writer: FileHandle
+
+    init() throws {
+        var master: Int32 = -1
+        var slave: Int32 = -1
+        guard openpty(&master, &slave, nil, nil, nil) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        reader = FileHandle(fileDescriptor: master, closeOnDealloc: true)
+        writer = FileHandle(fileDescriptor: slave, closeOnDealloc: true)
+        var attributes = termios()
+        guard tcgetattr(slave, &attributes) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        cfmakeraw(&attributes)
+        guard tcsetattr(slave, TCSANOW, &attributes) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    func read() throws -> Data {
+        var bytes = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let count = Darwin.read(reader.fileDescriptor, &bytes, bytes.count)
+            if count >= 0 { return Data(bytes.prefix(count)) }
+            if errno == EINTR { continue }
+            // A PTY may signal the last slave closing with EIO instead of EOF.
+            if errno == EIO { return Data() }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+}
+
 /// Owns one child process. All output is drained before delivering the final event.
 final class RsyncRunner: @unchecked Sendable {
     private let lock = NSLock()
@@ -96,14 +133,18 @@ final class RsyncRunner: @unchecked Sendable {
                             continuation.yield(.output(label))
                         }
                         let child = Process()
-                        let pipe = Pipe()
+                        let terminal = try RsyncOutputTerminal()
+                        defer {
+                            try? terminal.reader.close()
+                            try? terminal.writer.close()
+                        }
                         child.executableURL = URL(fileURLWithPath: RsyncCommand.executable)
                         child.arguments = arguments
                         var environment = ProcessInfo.processInfo.environment
                         environment["LC_ALL"] = "C"
                         child.environment = environment
-                        child.standardOutput = pipe
-                        child.standardError = pipe
+                        child.standardOutput = terminal.writer
+                        child.standardError = terminal.writer
                         child.standardInput = FileHandle.nullDevice
                         lock.lock()
                         if cancelled {
@@ -117,29 +158,47 @@ final class RsyncRunner: @unchecked Sendable {
                         do { try child.run() } catch { lock.unlock(); throw error }
                         if paused { _ = suspendTree(child.processIdentifier) }
                         lock.unlock()
-                        pipe.fileHandleForWriting.closeFile()
+                        try terminal.writer.close()
                         var pending = Data()
                         var logError: Error?
                         while true {
-                            let data = pipe.fileHandleForReading.availableData
-                            if data.isEmpty { break }
-                            do { try log.write(contentsOf: data) } catch {
+                            let data: Data
+                            do { data = try terminal.read() } catch {
                                 logError = error
                                 cancel()
+                                break
                             }
+                            if data.isEmpty { break }
                             pending.append(data)
                             // Split bytes first so split UTF-8 characters survive pipe boundaries.
-                            if let end = pending.lastIndex(where: { $0 == 10 || $0 == 13 }) {
+                            // Complete lines are logged without rsync's diagnostics before being yielded.
+                            // A trailing CR waits for the LF that may follow so the pair is filtered together.
+                            var end = pending.lastIndex(where: { $0 == 10 || $0 == 13 })
+                            if let last = end, pending[last] == 13, last == pending.index(before: pending.endIndex) {
+                                end = pending[..<last].lastIndex(where: { $0 == 10 || $0 == 13 })
+                            }
+                            if let end {
                                 let batch = pending.prefix(through: end)
+                                do { try log.write(contentsOf: RsyncOutput.strippingDebugLines(batch)) } catch {
+                                    logError = error
+                                    cancel()
+                                }
                                 continuation.yield(.output(String(decoding: batch, as: UTF8.self)))
                                 pending.removeSubrange(...end)
                             }
                             if pending.count > 65_536 {
+                                do { try log.write(contentsOf: pending) } catch {
+                                    logError = error
+                                    cancel()
+                                }
                                 continuation.yield(.output(String(decoding: pending, as: UTF8.self)))
                                 pending.removeAll(keepingCapacity: true)
                             }
                         }
-                        if !pending.isEmpty { continuation.yield(.output(String(decoding: pending, as: UTF8.self))) }
+                        if !pending.isEmpty {
+                            do { try log.write(contentsOf: RsyncOutput.strippingDebugLines(pending)) } catch { logError = error }
+                            continuation.yield(.output(String(decoding: pending, as: UTF8.self)))
+                        }
                         child.waitUntilExit()
                         lock.lock()
                         let wasCancelled = cancelled
@@ -149,7 +208,7 @@ final class RsyncRunner: @unchecked Sendable {
                         let footer = "\nFinished: \(Date().formatted()) • Exit code: \(child.terminationStatus)\(wasCancelled ? " • Cancelled" : "")\n"
                         do { try log.write(contentsOf: Data(footer.utf8)) } catch { logError = error }
                         continuation.yield(.output(footer))
-                        if let logError { continuation.yield(.failed("Could not write the complete log: \(logError.localizedDescription)")) }
+                        if let logError { continuation.yield(.failed("Could not capture the complete run log: \(logError.localizedDescription)")) }
                         else if child.terminationStatus != 0 || wasCancelled || index == passes.count - 1 {
                             continuation.yield(.finished(child.terminationStatus, wasCancelled))
                         }

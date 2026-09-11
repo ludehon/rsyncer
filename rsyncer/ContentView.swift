@@ -1,12 +1,5 @@
 import SwiftUI
 
-enum Palette {
-    static let green = Color(red: 0.19, green: 0.43, blue: 0.34)
-    static let greenBright = Color(red: 0.29, green: 0.82, blue: 0.60)
-    static let sidebar = Color(red: 0.09, green: 0.15, blue: 0.14)
-    static let canvas = Color(nsColor: .windowBackgroundColor)
-}
-
 struct ContentView: View {
     @EnvironmentObject private var store: AppStore
     @State private var showSettings = false
@@ -48,8 +41,9 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.canvas)
         }
+        .id(store.theme)
         .frame(minWidth: 980, minHeight: 720)
-        .tint(Palette.green)
+        .tint(Palette.accent)
         .sheet(isPresented: $showSettings) { AppSettingsView().environmentObject(store) }
         .alert("Rename saved sync", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
             TextField("Sync name", text: $renameText)
@@ -94,8 +88,8 @@ struct ContentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 23, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.65, green: 0.85, blue: 0.62))
-                Text("rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Palette.soft)
+                Text("Rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
             Spacer().frame(height: 38)
             HStack {
@@ -112,11 +106,13 @@ struct ContentView: View {
                             HStack(spacing: 12) {
                                 SyncStatusIcon(active: store.activePairID == pair.id, paused: store.isPaused, cancelling: store.cancelling)
                                     .font(.system(size: 17))
-                                    .foregroundStyle(store.selectedID == pair.id && !showVolumes ? Color(red: 0.69, green: 0.87, blue: 0.68) : .white.opacity(0.5))
+                                    .foregroundStyle(store.selectedID == pair.id && !showVolumes ? Palette.soft : .white.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(pair.name.isEmpty ? "Untitled sync" : pair.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                                    Text(store.activePairID == pair.id ? (store.cancelling ? "Stopping…" : store.isPaused ? "Paused" : "In progress") : pair.schedule.kind == .manual ? "On your terms" : pair.schedule.kind.title)
+                                    Text(syncStatus(for: pair))
                                         .font(.system(size: 10)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                                        .monospacedDigit()
+                                        .help(syncStatus(for: pair))
                                 }
                                 Spacer(minLength: 0)
                                 if pair.schedule.kind != .manual { Image(systemName: "clock").font(.system(size: 11)).foregroundStyle(.white.opacity(0.4)) }
@@ -199,6 +195,19 @@ struct ContentView: View {
         }
         .foregroundStyle(.white)
         .background(Palette.sidebar)
+    }
+
+    private func syncStatus(for pair: SyncPair) -> String {
+        guard store.activePairID == pair.id else {
+            return pair.schedule.kind == .manual ? "Manual" : pair.schedule.kind.title
+        }
+        if store.cancelling { return "Stopping…" }
+        if store.isPaused { return "Paused" }
+        if let progress = store.progress {
+            let percentage = progress.formatted(.percent.precision(.fractionLength(0)))
+            return store.isPreview ? "Comparing · \(percentage)" : "\(store.isTransferring ? "Syncing" : "Checking") · \(percentage)"
+        }
+        return store.progressDetail
     }
 
     private func reorderGesture(for id: UUID) -> some Gesture {

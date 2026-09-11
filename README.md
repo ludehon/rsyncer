@@ -11,7 +11,11 @@ Open `rsyncer.xcodeproj` in Xcode, select the **rsyncer** scheme and **My Mac**,
 1. Click **+** beside **Saved syncs** and choose **One-way sync** or **Two-way sync**. The direction is fixed after creation. Drop a file or folder into **Source**, and a folder or mounted volume into **Destination**. You can also click to browse or type an absolute path (`/…` or `~/…`).
 2. Name the pair. Paths, options and schedules save automatically.
 3. Use **Preview** to see a visual plan without changing files. Summary cards show added, updated, and deleted items with separate file, folder, and link counts and affected file sizes. Destination cards show where changes will happen. Click any card to open a searchable details window with exact target paths. Sizes exclude folders and links; missing sizes are identified rather than counted as zero. The plan appears after comparison finishes; incomplete comparisons are marked clearly.
+   ![Preview showing the planned changes for a one-way sync](docs/preview-plan.jpg)
+
 4. Choose **Sync now**. Activity shows live output and previous runs; each run has a complete log file.
+
+   ![Activity list during a run, in a dark theme](docs/activity-dark.jpg)
 
 Click and hold a saved sync’s name or folder icon, then drag it to a new position in the sidebar. Cards shift as you drag, and the order is saved automatically. You can also right-click to rename, delete, launch, pause/resume, or move it up or down. Running syncs show spinning arrows; paused syncs show a pause icon. Rename and delete become available after the active run ends. Pause/resume is also available in the sync screen and menu bar; stopping a paused sync cancels it.
 
@@ -26,6 +30,8 @@ The options include timestamps, permissions, symlinks, hard links, Mac metadata,
 Choose hourly, daily, weekly, or drive-connection schedules for each saved pair. Timed schedules use local time. The scheduler checks every 30 seconds, runs one job at a time, and retries unavailable locations once per minute. A missed timed run executes once when the app is available again, then advances to the next scheduled time. Drive-connection schedules respond to mount events observed while the app is running.
 
 Closing the window leaves the menu bar app running. Quitting pauses scheduling; sleeping postpones runs until wake. **Launch at login** uses Apple's [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice). macOS may require approval in System Settings → General → Login Items. The app prevents idle sleep during an active transfer, but does not wake a sleeping or powered-off Mac.
+
+Settings also offer six themes — light purple (the default), light blue, yellow, red, deep blue and deep green — each setting the accent color and the sidebar shade. The choice is kept in the app's user defaults rather than `state.json`.
 
 ## Volumes, progress and logs
 
@@ -70,4 +76,6 @@ The UI harness sends mouse events to an isolated app window and checks selection
 
 Physical unplug/replug, login after reboot, and macOS privacy prompts should be checked on the target Mac before relying on unattended runs.
 
-Regenerate the app icon assets from `artwork/icon.png` with `swift scripts/generate-icon.swift`.
+Regenerate the app icon assets from `artwork/icon.png` with `python3 scripts/normalize-icon.py && swift scripts/generate-icon.swift`.
+
+The normalise step exists because macOS 26 only recognises artwork as an app icon if its silhouette is a clean, square rounded rectangle; artwork that is even a few percent off square gets pasted onto a generic light plate at roughly 60% size instead of filling the tile. It squares the shape off and re-masks it, keeping a rounded alpha so the icon still renders correctly on macOS 14/15, which do not mask icons themselves.

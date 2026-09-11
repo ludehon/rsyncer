@@ -18,15 +18,23 @@ final class AppStore: ObservableObject {
     @Published var output = ""
     @Published var progress: Double?
     @Published var progressDetail = ""
+    @Published var fileListStartedAt: Date?
+    /// Entries rsync has examined so far in the current pass, against the file-list total.
+    @Published var itemsChecked = 0
+    @Published var itemsTotal = 0
+    @Published var currentItem = ""
+    @Published var isTransferring = false
     @Published var currentLogURL: URL?
     @Published var loginEnabled = false
     @Published var loginNeedsApproval = false
     @Published var changesSaved = true
     @Published var scheduleStatus: [UUID: String] = [:]
+    @Published var theme = AppTheme.current { didSet { AppTheme.current = theme } }
     let volumes = VolumeMonitor()
     let dataDirectory: URL
     let logsDirectory: URL
     private var runner: RsyncRunner?
+    private var checkedPaths = Set<String>()
     private var timer: Timer?
     private var pendingMounts: Set<UUID> = []
     private var retryAfter: [UUID: Date] = [:]
@@ -164,7 +172,9 @@ final class AppStore: ObservableObject {
         cancelling = false
         isPaused = false
         progress = nil
-        progressDetail = preview ? "Comparing locations…" : "Building file list…"
+        fileListStartedAt = started
+        progressDetail = "Preparing sync…"
+        resetItemProgress()
         output = heading
         currentLogURL = logURL
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Syncing files between volumes")
@@ -174,15 +184,49 @@ final class AppStore: ObservableObject {
             for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: heading) {
                 switch event {
                 case .output(let chunk):
-                    output += chunk.replacingOccurrences(of: "\r", with: "\n")
+                    let text = chunk.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+                    output += text.components(separatedBy: "\n").filter { !RsyncOutput.isDebugLine($0) }.joined(separator: "\n")
                     if output.utf8.count > 160_000 { output = String(output.suffix(100_000)) }
                     for line in chunk.components(separatedBy: .newlines) {
                         if line == "Pass 1/2: Source → Destination" || line == "Pass 2/2: Destination → Source" {
                             progress = nil
-                            progressDetail = preview ? "Comparing locations…" : "Building file list…"
+                            fileListStartedAt = Date()
+                            progressDetail = "Preparing sync…"
+                            resetItemProgress()
+                        }
+                        if let list = FileListProgress.parse(line) {
+                            progress = nil
+                            if list.complete {
+                                fileListStartedAt = nil
+                                if !preview { itemsTotal = list.count }
+                                progressDetail = preview
+                                    ? "Checking \(list.count.formatted()) files and folders for changes…"
+                                    : "\(list.count.formatted()) items found. Preparing destination and checking changes…"
+                            } else {
+                                progressDetail = "Scanning · \(list.count.formatted()) items found"
+                            }
+                        }
+                        if !preview, let item = ProcessedItem.parse(line), checkedPaths.insert(item.path).inserted {
+                            fileListStartedAt = nil
+                            itemsChecked = checkedPaths.count
+                            currentItem = item.path
+                            if itemsTotal > 0 { progress = min(1, Double(itemsChecked) / Double(itemsTotal)) }
+                            progressDetail = itemsTotal > 0
+                                ? "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items checked"
+                                : "\(itemsChecked.formatted()) items checked"
                         }
                         let parsed = preview ? TransferProgress.comparison(line) : TransferProgress.parse(line)
-                        if let parsed { progress = parsed.fraction; progressDetail = parsed.detail }
+                        if let parsed {
+                            fileListStartedAt = nil
+                            if preview || itemsTotal == 0 {
+                                progress = parsed.fraction
+                                progressDetail = parsed.detail
+                            } else {
+                                // The bar tracks items across the whole run; the current file's transfer is described in text.
+                                progressDetail = "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items · \(parsed.detail)"
+                            }
+                            if !preview { isTransferring = true }
+                        }
                     }
                 case .finished(let code, let cancelled):
                     finish(pair: pair, started: started, preview: preview, code: code, cancelled: cancelled, logURL: logURL)
@@ -214,7 +258,11 @@ final class AppStore: ObservableObject {
         }
         output += "\n\(record.title) • Exit code \(code)\n"
         progressDetail = record.title
+        fileListStartedAt = nil
         progress = record.succeeded ? 1 : nil
+        currentItem = ""
+        isTransferring = false
+        checkedPaths.removeAll()
         activePairID = nil
         runner = nil
         cancelling = false
@@ -225,6 +273,14 @@ final class AppStore: ObservableObject {
         }
         volumes.refresh()
         save()
+    }
+
+    private func resetItemProgress() {
+        checkedPaths.removeAll()
+        itemsChecked = 0
+        itemsTotal = 0
+        currentItem = ""
+        isTransferring = false
     }
 
     func togglePause() {
