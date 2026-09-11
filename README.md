@@ -57,7 +57,11 @@ With Xcode installed and selected as the active developer directory, run:
 ./scripts/build-dmg.sh
 ```
 
-This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.0.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut for drag-and-drop installation. Running the command again replaces the DMG for that version.
+This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.0.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut with large icons, a Retina background, and drag-and-drop instructions. Running the command again replaces the DMG for that version.
+
+Packaging uses Finder to save the installer window layout, so run it in a logged-in macOS desktop session. If macOS asks, allow your terminal to control Finder. The background and layout are defined in `scripts/generate-dmg-background.swift` and `scripts/layout-dmg.applescript`.
+
+Packaging also uses Python 3 (available with Xcode's command-line tools) to finalize the stored icon coordinates and verifies them from the finished, read-only DMG. If Finder shows `.background` or `.fseventsd`, press **Command–Shift–Period** to turn off showing hidden files. Eject older Rsyncer images before opening a rebuilt DMG.
 
 The default build is ad hoc signed for local testing. For public downloads that pass macOS Gatekeeper, use a **Developer ID Application** certificate and Apple notarization, which require Apple Developer Program membership. In Xcode, choose **Product → Archive**, then distribute the archive using **Developer ID**, upload it for notarization, and export the notarized app. Package that export with:
 
