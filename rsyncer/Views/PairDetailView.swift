@@ -39,26 +39,15 @@ struct PairDetailView: View {
                         LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
                     }.disabled(locked)
                     VStack(spacing: 0) {
-                        HStack(spacing: 27) {
-                            ForEach(DetailTab.allCases, id: \.self) { item in
-                                Button { tab = item } label: {
-                                    VStack(spacing: 13) {
-                                        HStack(spacing: 6) {
-                                            Text(item.rawValue)
-                                            if item == .activity {
-                                                Text("\(store.history.filter { $0.pairID == pairID }.count)")
-                                                    .font(.system(size: 9)).padding(.horizontal, 5).padding(.vertical, 2)
-                                                    .background(.primary.opacity(0.06), in: Capsule())
-                                            }
-                                        }.font(.system(size: 12, weight: tab == item ? .semibold : .regular))
-                                        Rectangle().fill(tab == item ? Palette.green : .clear).frame(height: 2)
-                                    }.foregroundStyle(tab == item ? Palette.green : .secondary)
-                                }.buttonStyle(.plain)
+                        HStack(spacing: 16) {
+                            DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
+                            Spacer(minLength: 0)
+                            if !store.changesSaved {
+                                Text("NOT SAVED")
+                                    .font(.system(size: 9, weight: .medium)).tracking(1.2)
+                                    .foregroundStyle(.orange)
                             }
-                            Spacer()
-                            Text(store.changesSaved ? "AUTOSAVED" : "NOT SAVED").font(.system(size: 9, weight: .medium)).tracking(1.2).foregroundStyle(store.changesSaved ? Color.secondary : .orange).padding(.bottom, 13)
                         }
-                        Divider()
                         Group {
                             switch tab {
                             case .options: SyncOptionsView(options: binding.options, twoWay: pair.direction == .twoWay).disabled(locked)
@@ -95,14 +84,12 @@ struct PairDetailView: View {
             HStack {
                 Button(action: store.revealLogs) {
                     Label("View logs", systemImage: "doc.text")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.greenBright)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .controlSize(.large)
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(locked ? (store.isPaused ? "Sync paused" : store.isPreview ? "Previewing changes" : "Sync in progress") : pair.isConfigured ? "Ready when you are" : "Choose your locations", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "checkmark.circle")
-                        .font(.system(size: 12, weight: .medium))
-                    Text(locked ? "You can close this window. rsyncer stays in the menu bar." : "Preview a sync to see what will change.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }
                 Spacer()
                 if locked {
                     Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling).controlSize(.large)
@@ -110,12 +97,12 @@ struct PairDetailView: View {
                 } else {
                     Button { store.start(pair, preview: true); tab = .preview } label: {
                         Label("Preview", systemImage: "eye")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.green)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Palette.greenBright)
                             .padding(.horizontal, 18).frame(height: 30)
-                            .background(Palette.green.opacity(0.05), in: Capsule())
+                            .background(Palette.greenBright.opacity(0.12), in: Capsule())
                             .overlay {
-                                Capsule().strokeBorder(Color.primary.opacity(0.65), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                                Capsule().strokeBorder(Palette.greenBright.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
                             }
                             .contentShape(Capsule())
                     }
@@ -139,6 +126,26 @@ struct PairDetailView: View {
                 }
             }
         }.padding(.horizontal, 32).padding(.vertical, 20).background(.background).overlay(alignment: .top) { Divider() }
+    }
+}
+
+struct DetailTabSelector: View {
+    @Binding var selection: PairDetailView.DetailTab
+    let activityCount: Int
+
+    var body: some View {
+        Picker("Sync sections", selection: $selection) {
+            ForEach(PairDetailView.DetailTab.allCases, id: \.self) { item in
+                Text(item == .activity && activityCount > 0
+                     ? "Activity (\(activityCount))"
+                     : item.rawValue)
+                    .tag(item)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.large)
+        .frame(maxWidth: 540, alignment: .leading)
     }
 }
 
