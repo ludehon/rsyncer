@@ -8,14 +8,14 @@ struct ActivityView: View {
     private var statusTitle: String {
         if store.cancelling { return "Stopping…" }
         if store.isPaused { return "Paused" }
-        if store.fileListStartedAt != nil { return "Preparing sync" }
+        if store.fileListStartedAt != nil { return store.isPreview ? "Preparing preview" : "Preparing sync" }
         if store.progress == nil { return store.isPreview ? "Checking for changes" : "Preparing destination" }
         if store.isPreview { return "Comparing files" }
         return store.isTransferring ? "Syncing files" : "Checking files"
     }
     private var isCheckingOnly: Bool { !store.isPreview && store.progress != nil && !store.isTransferring && !store.cancelling && !store.isPaused }
     private var statusDetail: String {
-        if store.cancelling { return "Waiting for the current sync to stop." }
+        if store.cancelling { return store.isPreview ? "Waiting for the preview to stop." : "Waiting for the current sync to stop." }
         if store.isPaused { return "Resume when you’re ready to continue." }
         return store.progressDetail
     }
@@ -53,7 +53,9 @@ struct ActivityView: View {
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     if let started = store.fileListStartedAt, !store.cancelling, !store.isPaused {
-                        Text("Waiting for rsync to report progress. It may be reading folders or preparing the destination.")
+                        Text(store.isPreview
+                             ? "Waiting for rsync to report progress. It may be reading folders or comparing their contents."
+                             : "Waiting for rsync to report progress. It may be reading folders or preparing the destination.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack(spacing: 4) {
                             Text("Preparation started")

@@ -58,6 +58,10 @@ struct IntegrationTests {
         }
 
         var display = RunDisplayAccumulator(heading: "Test\n", preview: false)
+        var previewDisplay = RunDisplayAccumulator(heading: "Preview test\n", preview: true)
+        try expect(previewDisplay.snapshot(at: 0)?.detail == "Preparing preview…", "Preview progress starts with preview-specific status")
+        previewDisplay.consume("Pass 2/2: Destination → Source\n")
+        try expect(previewDisplay.snapshot(at: 0.1, force: true)?.detail == "Preparing preview…", "A second preview pass keeps preview-specific status")
         display.consume("Transfer starting: 2000 files\n")
         try expect(display.snapshot(at: 0) != nil, "First progress snapshot is immediate")
         for index in 0..<2000 {

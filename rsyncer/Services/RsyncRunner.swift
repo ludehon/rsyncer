@@ -33,7 +33,7 @@ struct RunDisplayAccumulator {
     let preview: Bool
 
     init(heading: String, preview: Bool) {
-        state = RunDisplayState(output: heading)
+        state = RunDisplayState(output: heading, detail: preview ? "Preparing preview…" : "Preparing sync…")
         self.preview = preview
     }
 
@@ -44,7 +44,7 @@ struct RunDisplayAccumulator {
         if state.output.utf8.count > 160_000 { state.output = String(state.output.suffix(100_000)) }
         for line in chunk.components(separatedBy: .newlines) {
             if line == "Pass 1/2: Source → Destination" || line == "Pass 2/2: Destination → Source" {
-                state = RunDisplayState(output: state.output)
+                state = RunDisplayState(output: state.output, detail: preview ? "Preparing preview…" : "Preparing sync…")
                 checkedPaths.removeAll(keepingCapacity: true)
             }
             if let list = FileListProgress.parse(line) {

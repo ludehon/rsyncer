@@ -14,10 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store, store.isRunning else { return .terminateNow }
         let alert = NSAlert()
-        alert.messageText = "A sync is still running"
-        alert.informativeText = "Stop the sync before quitting. Partial files may remain in the destination."
-        alert.addButton(withTitle: "Keep syncing")
-        alert.addButton(withTitle: "Stop sync")
+        alert.messageText = store.isPreview ? "A preview is still running" : "A sync is still running"
+        alert.informativeText = store.isPreview ? "Stop the preview before quitting." : "Stop the sync before quitting. Partial files may remain in the destination."
+        alert.addButton(withTitle: store.isPreview ? "Keep previewing" : "Keep syncing")
+        alert.addButton(withTitle: store.isPreview ? "Stop preview" : "Stop sync")
         if alert.runModal() == .alertSecondButtonReturn { store.cancel() }
         return .terminateCancel
     }
@@ -64,8 +64,8 @@ struct MenuBarView: View {
         Text(store.isRunning ? "\(store.isPaused ? "Paused" : store.isPreview ? "Previewing" : "Syncing") \(store.activePairName)" : "rsyncer · Ready when you are")
         if store.isRunning {
             Text(store.progressDetail)
-            Button(store.isPaused ? "Resume sync" : "Pause sync", action: store.togglePause).disabled(store.cancelling)
-            Button("Stop sync", action: store.cancel).disabled(store.cancelling)
+            Button(store.isPaused ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause preview" : "Pause sync"), action: store.togglePause).disabled(store.cancelling)
+            Button(store.isPreview ? "Stop preview" : "Stop sync", action: store.cancel).disabled(store.cancelling)
         }
         Divider()
         Button("Open rsyncer") {

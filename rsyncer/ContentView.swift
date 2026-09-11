@@ -108,7 +108,7 @@ struct ContentView: View {
                     ForEach(store.pairs) { pair in
                         HStack(spacing: 4) {
                             HStack(spacing: 12) {
-                                SyncStatusIcon(active: store.activePairID == pair.id, paused: store.isPaused, cancelling: store.cancelling)
+                                SyncStatusIcon(active: store.activePairID == pair.id, preview: store.isPreview, paused: store.isPaused, cancelling: store.cancelling)
                                     .font(.system(size: 17))
                                     .foregroundStyle(store.selectedID == pair.id && !showVolumes ? Palette.soft : .white.opacity(0.5))
                                 VStack(alignment: .leading, spacing: 5) {
@@ -149,7 +149,7 @@ struct ContentView: View {
                                 .disabled(store.activePairID == pair.id)
                             Button("Launch", systemImage: "play.fill") { requestLaunch(pair) }
                                 .disabled(store.isRunning || !pair.isConfigured)
-                            Button(store.isPaused && store.activePairID == pair.id ? "Resume sync" : "Pause current sync", systemImage: store.isPaused && store.activePairID == pair.id ? "play.fill" : "pause.fill", action: store.togglePause)
+                            Button(store.isPaused && store.activePairID == pair.id ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause current preview" : "Pause current sync"), systemImage: store.isPaused && store.activePairID == pair.id ? "play.fill" : "pause.fill", action: store.togglePause)
                                 .disabled(store.activePairID != pair.id || store.cancelling)
                             Divider()
                             Button("Move up", systemImage: "arrow.up") { store.movePair(pair.id, by: -1) }
@@ -271,16 +271,17 @@ struct ContentView: View {
 
 struct SyncStatusIcon: View {
     var active: Bool
+    var preview: Bool
     var paused: Bool
     var cancelling: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !active || paused || cancelling || reduceMotion)) { context in
-            Image(systemName: active ? (paused ? "pause.circle" : "arrow.triangle.2.circlepath") : "folder")
+            Image(systemName: active ? (paused ? "pause.circle" : preview ? "eye" : "arrow.triangle.2.circlepath") : "folder")
                 .rotationEffect(.degrees(active && !paused && !cancelling && !reduceMotion ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.5) / 1.5 * 360 : 0))
         }
-        .accessibilityLabel(active ? (paused ? "Sync paused" : cancelling ? "Sync stopping" : "Sync running") : "Saved sync")
+        .accessibilityLabel(active ? (paused ? (preview ? "Preview paused" : "Sync paused") : cancelling ? (preview ? "Preview stopping" : "Sync stopping") : (preview ? "Preview running" : "Sync running")) : "Saved sync")
     }
 }
 

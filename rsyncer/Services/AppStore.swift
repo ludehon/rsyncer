@@ -178,11 +178,11 @@ final class AppStore: ObservableObject {
         isPaused = false
         progress = nil
         fileListStartedAt = started
-        progressDetail = "Preparing sync…"
+        progressDetail = preview ? "Preparing preview…" : "Preparing sync…"
         resetItemProgress()
         output = heading
         currentLogURL = logURL
-        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: "Syncing files between volumes")
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled], reason: preview ? "Previewing file changes" : "Syncing files between volumes")
         let worker = RsyncRunner()
         runner = worker
         Task {
@@ -261,7 +261,7 @@ final class AppStore: ObservableObject {
         guard isRunning else { return }
         cancelling = true
         isPaused = false
-        progressDetail = "Stopping rsync…"
+        progressDetail = isPreview ? "Stopping preview…" : "Stopping sync…"
         runner?.cancel()
     }
 

@@ -17,7 +17,7 @@ struct PairDetailView: View {
             // The header stays put; only the selected tab’s contents scroll.
             VStack(alignment: .leading, spacing: 25) {
                 HStack(alignment: .center, spacing: 12) {
-                    Label(locked ? (store.isPaused ? "Paused" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
+                    Label(locked ? (store.isPaused ? "Paused" : store.isPreview ? "Previewing" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : store.isPreview ? "eye" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Palette.accent)
                         .padding(.horizontal, 13).padding(.vertical, 8)
@@ -105,7 +105,7 @@ struct PairDetailView: View {
                 Spacer()
                 if locked {
                     Button(action: store.togglePause) {
-                        Label(store.isPaused ? "Resume sync" : "Pause sync", systemImage: store.isPaused ? "play.fill" : "pause.fill")
+                        Label(store.isPaused ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause preview" : "Pause sync"), systemImage: store.isPaused ? "play.fill" : "pause.fill")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Palette.accentBright)
                             .padding(.horizontal, 18).frame(height: 30)
@@ -117,7 +117,7 @@ struct PairDetailView: View {
                         .opacity(store.cancelling ? 0.4 : 1)
                         .disabled(store.cancelling)
                     Button(action: store.cancel) {
-                        Label(store.cancelling ? "Stopping…" : "Stop sync", systemImage: "stop.fill")
+                        Label(store.cancelling ? "Stopping…" : (store.isPreview ? "Stop preview" : "Stop sync"), systemImage: "stop.fill")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18).frame(height: 30)
