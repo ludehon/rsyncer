@@ -39,6 +39,8 @@ Click a selected source or destination icon to open that folder in Finder (file 
 
 Each selected source and destination shows a storage bar and free/total capacity. Unavailable locations are identified without showing misleading capacity.
 
+During syncs, the Dock icon shows the same progress as the app, with an animated bar while scanning and an orange bar when paused. It keeps updating with the window closed and clears when the run finishes or stops. Previews do not show a Dock bar.
+
 Connected drives update after mount, unmount and rename events, and every minute. Indicators report capacity, low space (under 10% free), and read-only status. They do not measure SMART or hardware health; use Disk Utility for diagnostics.
 
 Progress is **per file**, matching the bundled rsync's `--progress` output. Previews use the number of items checked in the current direction, rather than the dry run’s zero-byte percentage. Scanning shows indeterminate progress until rsync reports a fixed item total. No total-transfer percentage or ETA is fabricated.

@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 struct PairDetailView: View {
     @EnvironmentObject private var store: AppStore
     let pairID: UUID
-    @State private var tab = DetailTab.options
+    @Binding var tab: DetailTab
     @State private var confirmMirror = false
     @State private var hoveringMode = false
     enum DetailTab: String, CaseIterable { case options = "Options", schedule = "Schedule", preview = "Preview", activity = "Activity" }
@@ -49,7 +49,10 @@ struct PairDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 32).padding(.top, 12)
+            // Keep the scroll viewport clear of the segmented control. AppKit draws
+            // the control a little outside its SwiftUI layout bounds, so placing a
+            // clipping ScrollView directly against it trims the bottom edge.
+            .padding(.horizontal, 32).padding(.top, 12).padding(.bottom, 10)
             ScrollView {
                 Group {
                     switch tab {
@@ -60,10 +63,15 @@ struct PairDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 32).padding(.top, 22).padding(.bottom, 32)
+                // Together with the fixed header inset this preserves the original
+                // 22-point gap before the first item without clipping the tab bar.
+                .padding(.horizontal, 32).padding(.top, 12).padding(.bottom, 32)
             }
             .scrollBounceBehavior(.basedOnSize)
             footer
+        }
+        .onAppear {
+            if locked { tab = .activity }
         }
         .confirmationDialog("Delete extra destination files?", isPresented: $confirmMirror) {
             Button("Sync and delete extra files", role: .destructive) { store.start(pair, preview: false); tab = .activity }

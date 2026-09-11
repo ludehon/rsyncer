@@ -3,7 +3,13 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var store: AppStore?
+    weak var store: AppStore? {
+        didSet {
+            guard store !== oldValue else { return }
+            dockProgress = store.map { DockProgressController(store: $0) }
+        }
+    }
+    private var dockProgress: DockProgressController?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let store, store.isRunning else { return .terminateNow }

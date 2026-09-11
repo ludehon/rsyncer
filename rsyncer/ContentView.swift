@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var renameText = ""
     @State private var deleteID: UUID?
     @State private var launchID: UUID?
+    @State private var detailTab = PairDetailView.DetailTab.options
     @State private var draggedPairID: UUID?
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var dragSlots: [CGRect] = []
@@ -27,7 +28,7 @@ struct ContentView: View {
                 if showVolumes {
                     VolumesView(monitor: store.volumes)
                 } else if let pair = store.selectedPair {
-                    PairDetailView(pairID: pair.id).id(pair.id)
+                    PairDetailView(pairID: pair.id, tab: $detailTab).id(pair.id)
                 } else {
                     ContentUnavailableView {
                         Label("Make room for a little order", systemImage: "folder.badge.plus")
@@ -44,6 +45,9 @@ struct ContentView: View {
         .id(store.theme)
         .frame(minWidth: 980, minHeight: 720)
         .tint(Palette.accent)
+        .onChange(of: store.selectedID) { _, selectedID in
+            detailTab = selectedID == store.activePairID ? .activity : .options
+        }
         .sheet(isPresented: $showSettings) { AppSettingsView().environmentObject(store) }
         .alert("Rename saved sync", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
             TextField("Sync name", text: $renameText)
@@ -121,9 +125,9 @@ struct ContentView: View {
                             .padding(.vertical, 12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
-                            .onTapGesture { store.selectedID = pair.id; store.showingVolumes = false }
+                            .onTapGesture { selectSavedPair(pair) }
                             .accessibilityAddTraits(.isButton)
-                            .accessibilityAction { store.selectedID = pair.id; store.showingVolumes = false }
+                            .accessibilityAction { selectSavedPair(pair) }
                             .highPriorityGesture(reorderGesture(for: pair.id))
                             .help("Click to select; drag to reorder")
                             Button { requestLaunch(pair) } label: {
@@ -252,9 +256,16 @@ struct ContentView: View {
     }
 
     private func launch(_ pair: SyncPair) {
+        detailTab = .activity
         store.selectedID = pair.id
         store.showingVolumes = false
         store.start(pair, preview: false)
+    }
+
+    private func selectSavedPair(_ pair: SyncPair) {
+        detailTab = store.activePairID == pair.id ? .activity : .options
+        store.selectedID = pair.id
+        store.showingVolumes = false
     }
 }
 
