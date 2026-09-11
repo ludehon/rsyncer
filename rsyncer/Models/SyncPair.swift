@@ -49,6 +49,13 @@ struct SyncSchedule: Codable, Equatable {
     }
 }
 
+enum SyncDirection: String, Codable, CaseIterable, Identifiable {
+    case oneWay, twoWay
+    var id: String { rawValue }
+    var title: String { self == .oneWay ? "One-way sync" : "Two-way sync" }
+    var symbol: String { self == .oneWay ? "arrow.right" : "arrow.left.arrow.right" }
+}
+
 struct SyncPair: Identifiable, Codable, Equatable {
     var id = UUID()
     var name = "Untitled sync"
@@ -56,6 +63,12 @@ struct SyncPair: Identifiable, Codable, Equatable {
     var destination = ""
     var sourceVolumeID: String?
     var destinationVolumeID: String?
+    // Missing in settings saved before direction selection was introduced.
+    var savedDirection: SyncDirection?
+    var direction: SyncDirection {
+        get { savedDirection ?? .oneWay }
+        set { savedDirection = newValue }
+    }
     var options = SyncOptions()
     var schedule = SyncSchedule()
     var nextRun: Date?

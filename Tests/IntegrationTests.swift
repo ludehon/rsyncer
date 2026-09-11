@@ -27,7 +27,7 @@ struct IntegrationTests {
             let logURL = root.appendingPathComponent("\(UUID()).log")
             var result: (Int32, Bool)?
             var output = ""
-            for await event in worker.run(arguments: RsyncCommand.arguments(for: pair, preview: preview), logURL: logURL, heading: "Integration test\n") {
+            for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: "Integration test\n") {
                 switch event {
                 case .output(let text): output += text
                 case .finished(let code, let cancelled): result = (code, cancelled)
@@ -111,6 +111,40 @@ struct IntegrationTests {
         filePair.options.deleteExtraneous = false
         result = try await run(filePair)
         try expect(result.0 == 0, "Single-file source supported")
+        var twoWay = SyncPair(name: "Two-way", source: source.path, destination: destination.path)
+        twoWay.direction = .twoWay
+        twoWay.options.extendedAttributes = false
+        // Safety applies even to inconsistent settings loaded from disk.
+        twoWay.options.deleteExtraneous = true
+        twoWay.options.skipNewer = false
+        twoWay.options.preserveTimes = false
+        try RsyncCommand.validate(twoWay)
+        try write("left-only.txt", "left", to: source)
+        try write("right-only.txt", "right", to: destination)
+        try write("hello.txt", "newer right version", to: destination)
+        try fm.setAttributes([.modificationDate: Date().addingTimeInterval(7200)], ofItemAtPath: destination.appendingPathComponent("hello.txt").path)
+        result = try await run(twoWay, preview: true)
+        try expect(result.0 == 0 && result.2.contains("Pass 2/2"), "Two-way preview checks both directions")
+        try expect(!fm.fileExists(atPath: source.appendingPathComponent("right-only.txt").path) && !fm.fileExists(atPath: destination.appendingPathComponent("left-only.txt").path), "Two-way preview writes to neither side")
+        result = try await run(twoWay)
+        let merged = try String(contentsOf: source.appendingPathComponent("hello.txt"), encoding: .utf8)
+        try expect(result.0 == 0 && merged == "newer right version", "Two-way sync brings back newer destination content")
+        try expect(fm.fileExists(atPath: source.appendingPathComponent("right-only.txt").path) && fm.fileExists(atPath: destination.appendingPathComponent("left-only.txt").path), "Two-way sync merges files unique to either side without deleting them")
+        let cancelledTwoWay = RsyncRunner()
+        cancelledTwoWay.cancel()
+        result = try await run(twoWay, worker: cancelledTwoWay)
+        try expect(result.1 && !result.2.contains("Pass 2/2"), "Cancelled two-way run does not start the reverse pass")
+        var invalidTwoWay = twoWay
+        invalidTwoWay.source = filePair.source
+        try expectInvalid(invalidTwoWay, "Two-way sync rejects single-file sources")
+        let encodedTwoWay = try JSONEncoder().encode(twoWay)
+        let decodedTwoWay = try JSONDecoder().decode(SyncPair.self, from: encodedTwoWay)
+        try expect(decodedTwoWay.direction == .twoWay, "Two-way selection survives persistence")
+        var legacyJSON = try JSONSerialization.jsonObject(with: encodedTwoWay) as! [String: Any]
+        legacyJSON.removeValue(forKey: "savedDirection")
+        let legacy = try JSONDecoder().decode(SyncPair.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
+        try expect(legacy.direction == .oneWay, "Existing saved syncs default to one-way")
+
         try expect(TransferProgress.parse(" 1,024  42%  1.2MB/s 0:00:03")?.fraction == 0.42, "Per-file progress parsed")
         try expect(TransferProgress.parse("file.txt") == nil, "Non-progress output ignored")
         try expect(TransferProgress.parse("report 42%.txt") == nil, "Percent signs in filenames are not treated as progress")
@@ -170,11 +204,16 @@ struct IntegrationTests {
         try expect(SyncReorder.destination(for: -50, slotCenters: slots) == 0, "Dragging above the list clamps to the first slot")
         try expect(SyncReorder.destination(for: 400, slotCenters: slots) == 3, "Dragging below the list clamps to the last slot")
         try expect(SyncReorder.destination(for: 0, slotCenters: []) == nil, "Empty lists have no reorder target")
-        store.addPair()
+        store.addPair(direction: .twoWay)
+        var attemptedDirectionChange = store.selectedPair!
+        attemptedDirectionChange.direction = .oneWay
+        store.update(attemptedDirectionChange)
+        try expect(store.selectedPair?.direction == .twoWay, "Direction chosen at creation cannot be changed by editing a sync")
         let addedID = store.selectedID!
         store.renamePair(addedID, to: "  Second sync  ")
         store.movePair(addedID, by: -1)
         let reordered = AppStore(dataDirectory: settings, enableScheduling: false)
+        try expect(reordered.pairs.first?.direction == .twoWay, "Direction chosen in the add menu survives reload")
         try expect(reordered.pairs.first?.id == addedID && reordered.pairs.first?.name == "Second sync", "Renaming and reordering survive reload")
         store.movePair(addedID, by: -1)
         try expect(store.pairs.first?.id == addedID && store.selectedID == addedID, "Moving past the top preserves order and selection")

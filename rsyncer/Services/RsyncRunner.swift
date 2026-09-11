@@ -76,6 +76,10 @@ final class RsyncRunner: @unchecked Sendable {
     }
 
     func run(arguments: [String], logURL: URL, heading: String) -> AsyncStream<RunEvent> {
+        run(passes: [arguments], logURL: logURL, heading: heading)
+    }
+
+    func run(passes: [[String]], logURL: URL, heading: String) -> AsyncStream<RunEvent> {
         // Logs are written before yielding. Slow UI consumers may skip old display
         // batches without losing any on-disk output or the final completion event.
         AsyncStream(bufferingPolicy: .bufferingNewest(128)) { continuation in
@@ -85,61 +89,72 @@ final class RsyncRunner: @unchecked Sendable {
                     let log = try FileHandle(forWritingTo: logURL)
                     defer { try? log.close() }
                     try log.seekToEnd()
-                    let child = Process()
-                    let pipe = Pipe()
-                    child.executableURL = URL(fileURLWithPath: RsyncCommand.executable)
-                    child.arguments = arguments
-                    var environment = ProcessInfo.processInfo.environment
-                    environment["LC_ALL"] = "C"
-                    child.environment = environment
-                    child.standardOutput = pipe
-                    child.standardError = pipe
-                    child.standardInput = FileHandle.nullDevice
-                    lock.lock()
-                    if cancelled {
+                    for (index, arguments) in passes.enumerated() {
+                        if passes.count > 1 {
+                            let label = "\nPass \(index + 1)/\(passes.count): \(index == 0 ? "Source → Destination" : "Destination → Source")\n"
+                            try log.write(contentsOf: Data(label.utf8))
+                            continuation.yield(.output(label))
+                        }
+                        let child = Process()
+                        let pipe = Pipe()
+                        child.executableURL = URL(fileURLWithPath: RsyncCommand.executable)
+                        child.arguments = arguments
+                        var environment = ProcessInfo.processInfo.environment
+                        environment["LC_ALL"] = "C"
+                        child.environment = environment
+                        child.standardOutput = pipe
+                        child.standardError = pipe
+                        child.standardInput = FileHandle.nullDevice
+                        lock.lock()
+                        if cancelled {
+                            lock.unlock()
+                            try log.write(contentsOf: Data("\nCancelled before launch.\n".utf8))
+                            continuation.yield(.finished(20, true))
+                            continuation.finish()
+                            return
+                        }
+                        process = child
+                        do { try child.run() } catch { lock.unlock(); throw error }
+                        if paused { _ = suspendTree(child.processIdentifier) }
                         lock.unlock()
-                        try log.write(contentsOf: Data("\nCancelled before launch.\n".utf8))
-                        continuation.yield(.finished(20, true))
-                        continuation.finish()
-                        return
+                        pipe.fileHandleForWriting.closeFile()
+                        var pending = Data()
+                        var logError: Error?
+                        while true {
+                            let data = pipe.fileHandleForReading.availableData
+                            if data.isEmpty { break }
+                            do { try log.write(contentsOf: data) } catch {
+                                logError = error
+                                cancel()
+                            }
+                            pending.append(data)
+                            // Split bytes first so split UTF-8 characters survive pipe boundaries.
+                            if let end = pending.lastIndex(where: { $0 == 10 || $0 == 13 }) {
+                                let batch = pending.prefix(through: end)
+                                continuation.yield(.output(String(decoding: batch, as: UTF8.self)))
+                                pending.removeSubrange(...end)
+                            }
+                            if pending.count > 65_536 {
+                                continuation.yield(.output(String(decoding: pending, as: UTF8.self)))
+                                pending.removeAll(keepingCapacity: true)
+                            }
+                        }
+                        if !pending.isEmpty { continuation.yield(.output(String(decoding: pending, as: UTF8.self))) }
+                        child.waitUntilExit()
+                        lock.lock()
+                        let wasCancelled = cancelled
+                        process = nil
+                        _ = resumeLocked()
+                        lock.unlock()
+                        let footer = "\nFinished: \(Date().formatted()) • Exit code: \(child.terminationStatus)\(wasCancelled ? " • Cancelled" : "")\n"
+                        do { try log.write(contentsOf: Data(footer.utf8)) } catch { logError = error }
+                        continuation.yield(.output(footer))
+                        if let logError { continuation.yield(.failed("Could not write the complete log: \(logError.localizedDescription)")) }
+                        else if child.terminationStatus != 0 || wasCancelled || index == passes.count - 1 {
+                            continuation.yield(.finished(child.terminationStatus, wasCancelled))
+                        }
+                        if logError != nil || child.terminationStatus != 0 || wasCancelled { break }
                     }
-                    process = child
-                    do { try child.run() } catch { lock.unlock(); throw error }
-                    if paused { _ = suspendTree(child.processIdentifier) }
-                    lock.unlock()
-                    pipe.fileHandleForWriting.closeFile()
-                    var pending = Data()
-                    var logError: Error?
-                    while true {
-                        let data = pipe.fileHandleForReading.availableData
-                        if data.isEmpty { break }
-                        do { try log.write(contentsOf: data) } catch {
-                            logError = error
-                            cancel()
-                        }
-                        pending.append(data)
-                        // Split bytes first so split UTF-8 characters survive pipe boundaries.
-                        if let end = pending.lastIndex(where: { $0 == 10 || $0 == 13 }) {
-                            let batch = pending.prefix(through: end)
-                            continuation.yield(.output(String(decoding: batch, as: UTF8.self)))
-                            pending.removeSubrange(...end)
-                        }
-                        if pending.count > 65_536 {
-                            continuation.yield(.output(String(decoding: pending, as: UTF8.self)))
-                            pending.removeAll(keepingCapacity: true)
-                        }
-                    }
-                    if !pending.isEmpty { continuation.yield(.output(String(decoding: pending, as: UTF8.self))) }
-                    child.waitUntilExit()
-                    lock.lock()
-                    let wasCancelled = cancelled
-                    process = nil
-                    _ = resumeLocked()
-                    lock.unlock()
-                    let footer = "\nFinished: \(Date().formatted()) • Exit code: \(child.terminationStatus)\(wasCancelled ? " • Cancelled" : "")\n"
-                    do { try log.write(contentsOf: Data(footer.utf8)) } catch { logError = error }
-                    if let logError { continuation.yield(.failed("Could not write the complete log: \(logError.localizedDescription)")) }
-                    else { continuation.yield(.finished(child.terminationStatus, wasCancelled)) }
                 } catch {
                     continuation.yield(.failed(error.localizedDescription))
                 }

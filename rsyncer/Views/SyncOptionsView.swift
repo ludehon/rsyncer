@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SyncOptionsView: View {
     @Binding var options: SyncOptions
+    var twoWay = false
     @State private var advanced = false
     @State private var confirmDeletion = false
 
@@ -12,18 +13,23 @@ struct SyncOptionsView: View {
                 Text("Thoughtful defaults. Fine-tune the details below.").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 28), GridItem(.flexible())], alignment: .leading, spacing: 20) {
-                OptionRow(title: "Preserve timestamps", detail: "Keep original modification dates", value: $options.preserveTimes)
-                OptionRow(title: "Skip newer files", detail: "Keep newer destination versions", value: $options.skipNewer)
+                OptionRow(title: "Preserve timestamps", detail: "Keep original modification dates", value: $options.preserveTimes).disabled(twoWay)
+                OptionRow(title: "Skip newer files", detail: "Keep newer destination versions", value: $options.skipNewer).disabled(twoWay)
                 OptionRow(title: "Keep Mac metadata", detail: "Copy attributes and resource forks during sync; omitted from preview", value: $options.extendedAttributes)
                 OptionRow(title: "Verify with checksums", detail: "Compare contents instead of size and date", value: $options.checksum)
                 OptionRow(title: "Preserve symbolic links", detail: "Copy links without following their targets", value: $options.preserveLinks)
                 OptionRow(title: "Keep partial transfers", detail: "Keep incomplete files for the next run", value: $options.keepPartial)
             }
             Divider()
-            OptionRow(title: "Delete extra destination files", detail: "Remove destination files missing from the source. Excluded files are kept.", value: Binding(get: { options.deleteExtraneous }, set: { if $0 { confirmDeletion = true } else { options.deleteExtraneous = false } }), destructive: true)
-            if options.deleteExtraneous {
-                Label("Deletion is enabled, including for scheduled runs. Preview before syncing.", systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 11)).foregroundStyle(.orange)
+            if !twoWay {
+                OptionRow(title: "Delete extra destination files", detail: "Remove destination files missing from the source. Excluded files are kept.", value: Binding(get: { options.deleteExtraneous }, set: { if $0 { confirmDeletion = true } else { options.deleteExtraneous = false } }), destructive: true)
+                if options.deleteExtraneous {
+                    Label("Deletion is enabled, including for scheduled runs. Preview before syncing.", systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                }
+            } else {
+                Text("Two-way sync always preserves timestamps and newer files, and keeps files found on only one side.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             DisclosureGroup("More options & exclusions", isExpanded: $advanced) {
                 VStack(alignment: .leading, spacing: 20) {

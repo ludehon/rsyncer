@@ -88,6 +88,7 @@ final class AppStore: ObservableObject {
     func update(_ pair: SyncPair) {
         guard let index = pairs.firstIndex(where: { $0.id == pair.id }), activePairID != pair.id else { return }
         var updated = pair
+        updated.direction = pairs[index].direction
         if pair.source != pairs[index].source { updated.sourceVolumeID = RsyncCommand.volumeID(for: pair.source) }
         if pair.destination != pairs[index].destination { updated.destinationVolumeID = RsyncCommand.volumeID(for: pair.destination) }
         if pair.schedule != pairs[index].schedule {
@@ -108,8 +109,9 @@ final class AppStore: ObservableObject {
         update(pair)
     }
 
-    func addPair() {
-        let pair = SyncPair()
+    func addPair(direction: SyncDirection = .oneWay) {
+        var pair = SyncPair()
+        pair.direction = direction
         pairs.append(pair)
         selectedID = pair.id
         save()
@@ -140,7 +142,7 @@ final class AppStore: ObservableObject {
     func chooseLocation(source: Bool, pairID: UUID) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
-        panel.canChooseFiles = source
+        panel.canChooseFiles = source && pairs.first(where: { $0.id == pairID })?.direction != .twoWay
         panel.allowsMultipleSelection = false
         panel.prompt = source ? "Choose source" : "Choose destination"
         if panel.runModal() == .OK, let url = panel.url { setLocation(url, source: source, pairID: pairID) }
@@ -167,7 +169,7 @@ final class AppStore: ObservableObject {
         let worker = RsyncRunner()
         runner = worker
         Task {
-            for await event in worker.run(arguments: RsyncCommand.arguments(for: pair, preview: preview), logURL: logURL, heading: heading) {
+            for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: heading) {
                 switch event {
                 case .output(let chunk):
                     output += chunk.replacingOccurrences(of: "\r", with: "\n")

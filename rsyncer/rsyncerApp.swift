@@ -31,7 +31,14 @@ struct rsyncerApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("New sync pair", action: store.addPair).keyboardShortcut("n", modifiers: .command)
+                Menu("New sync pair") {
+                    ForEach(SyncDirection.allCases) { direction in
+                        Button(direction.title) {
+                            store.addPair(direction: direction)
+                            store.showingVolumes = false
+                        }
+                    }
+                }
             }
         }
         Settings { AppSettingsView().environmentObject(store) }

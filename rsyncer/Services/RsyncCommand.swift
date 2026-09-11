@@ -51,11 +51,24 @@ enum RsyncCommand {
         }
         guard fm.isReadableFile(atPath: source.path) else { throw SyncError.invalid("The source is not readable. Check its permissions in Finder.") }
         guard fm.isWritableFile(atPath: destination.path) else { throw SyncError.invalid("The destination is read-only or you do not have permission to write to it.") }
+        if pair.direction == .twoWay {
+            guard sourceType.isDirectory == true else {
+                throw SyncError.invalid("Two-way sync requires two folders or mounted volumes.")
+            }
+            guard fm.isWritableFile(atPath: source.path), fm.isReadableFile(atPath: destination.path) else {
+                throw SyncError.invalid("Two-way sync needs read and write access to both locations.")
+            }
+        }
         guard pair.options.bandwidthLimit >= 0 else { throw SyncError.invalid("Bandwidth limit cannot be negative.") }
     }
 
     static func arguments(for pair: SyncPair, preview: Bool) -> [String] {
-        let o = pair.options
+        var o = pair.options
+        if pair.direction == .twoWay {
+            o.preserveTimes = true
+            o.skipNewer = true
+            o.deleteExtraneous = false
+        }
         var args = ["--recursive", "--verbose", "--itemize-changes", "--progress", "--stats"]
         let flags: [(Bool, String)] = [
             (o.preserveTimes, "--times"), (o.preservePermissions, "--perms"),
@@ -82,10 +95,23 @@ enum RsyncCommand {
         return args
     }
 
+    static func passes(for pair: SyncPair, preview: Bool) -> [[String]] {
+        var passes = [arguments(for: pair, preview: preview)]
+        if pair.direction == .twoWay {
+            var reverse = pair
+            swap(&reverse.source, &reverse.destination)
+            swap(&reverse.sourceVolumeID, &reverse.destinationVolumeID)
+            passes.append(arguments(for: reverse, preview: preview))
+        }
+        return passes
+    }
+
     static func display(for pair: SyncPair, preview: Bool) -> String {
-        ([executable] + arguments(for: pair, preview: preview)).map {
+        passes(for: pair, preview: preview).map { arguments in
+            ([executable] + arguments).map {
             "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        }.joined(separator: " ")
+            }.joined(separator: " ")
+        }.joined(separator: "\n")
     }
 }
 

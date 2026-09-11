@@ -40,7 +40,7 @@ struct ContentView: View {
                     } description: {
                         Text("Save a pair of locations to start your first sync.")
                     } actions: {
-                        Button("Create a sync", action: store.addPair).buttonStyle(.borderedProminent)
+                        Menu("Create a sync") { newSyncOptions }.menuStyle(.borderlessButton).fixedSize()
                     }
                 }
             }
@@ -77,6 +77,17 @@ struct ContentView: View {
         } message: { Text(store.errorMessage ?? "") }
     }
 
+    private var newSyncOptions: some View {
+        ForEach(SyncDirection.allCases) { direction in
+            Button {
+                store.addPair(direction: direction)
+                store.showingVolumes = false
+            } label: {
+                Label(direction.title, systemImage: direction.symbol)
+            }
+        }
+    }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -89,8 +100,9 @@ struct ContentView: View {
             HStack {
                 Text("SAVED SYNCS").font(.system(size: 10, weight: .semibold)).tracking(1.6)
                 Spacer()
-                Button { store.addPair(); store.showingVolumes = false } label: { Image(systemName: "plus").font(.system(size: 13)) }
-                    .buttonStyle(.plain).help("New sync pair")
+                Menu { newSyncOptions } label: { Image(systemName: "plus").font(.system(size: 13)) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("Add sync").help("New sync pair")
             }.foregroundStyle(.white.opacity(0.5)).padding(.horizontal, 24).padding(.bottom, 12)
             ScrollView {
                 VStack(spacing: 6) {
@@ -225,7 +237,7 @@ struct ContentView: View {
     }
 
     private func requestLaunch(_ pair: SyncPair) {
-        if pair.options.deleteExtraneous { launchID = pair.id }
+        if pair.direction == .oneWay && pair.options.deleteExtraneous { launchID = pair.id }
         else { launch(pair) }
     }
 

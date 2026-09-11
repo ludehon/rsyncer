@@ -16,7 +16,7 @@ struct PairDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 25) {
                     HStack(alignment: .top) {
-                        Label(locked ? (store.isPaused ? "Paused" : "Syncing") : "One-way sync", systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : "arrow.right")
+                        Label(locked ? (store.isPaused ? "Paused" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Color(red: 0.36, green: 0.72, blue: 0.55))
                             .padding(.horizontal, 13).padding(.vertical, 8)
@@ -38,7 +38,9 @@ struct PairDetailView: View {
                     }.disabled(locked)
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
-                        Text("Folder contents are copied into the destination. Your source stays intact.")
+                        Text(pair.direction == .oneWay
+                             ? "Folder contents are copied into the destination. Your source stays intact."
+                             : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
                     }.font(.system(size: 11)).foregroundStyle(.secondary)
                     VStack(spacing: 0) {
                         HStack(spacing: 27) {
@@ -63,7 +65,7 @@ struct PairDetailView: View {
                         Divider()
                         Group {
                             switch tab {
-                            case .options: SyncOptionsView(options: binding.options).disabled(locked)
+                            case .options: SyncOptionsView(options: binding.options, twoWay: pair.direction == .twoWay).disabled(locked)
                             case .schedule: ScheduleView(pair: binding).disabled(locked)
                             case .activity: ActivityView(pairID: pairID)
                             }
@@ -112,9 +114,9 @@ struct PairDetailView: View {
                     Button { store.start(pair, preview: true); tab = .activity } label: { Label("Preview", systemImage: "eye").padding(.horizontal, 6) }
                         .controlSize(.large).disabled(!pair.isConfigured || store.isRunning)
                     Button {
-                        if pair.options.deleteExtraneous { confirmMirror = true }
+                        if pair.direction == .oneWay && pair.options.deleteExtraneous { confirmMirror = true }
                         else { store.start(pair, preview: false); tab = .activity }
-                    } label: { Label("Sync now", systemImage: "arrow.right").padding(.horizontal, 12) }
+                    } label: { Label("Sync now", systemImage: pair.direction.symbol).padding(.horizontal, 12) }
                         .buttonStyle(.borderedProminent).controlSize(.large).disabled(!pair.isConfigured || store.isRunning)
                 }
             }

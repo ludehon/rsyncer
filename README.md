@@ -8,14 +8,16 @@ Open `rsyncer.xcodeproj` in Xcode, select the **rsyncer** scheme and **My Mac**,
 
 ## Using the app
 
-1. Drop a file or folder into **Source**, and a folder or mounted volume into **Destination**. You can also click to browse or type an absolute path (`/…` or `~/…`).
+1. Click **+** beside **Saved syncs** and choose **One-way sync** or **Two-way sync**. The direction is fixed after creation. Drop a file or folder into **Source**, and a folder or mounted volume into **Destination**. You can also click to browse or type an absolute path (`/…` or `~/…`).
 2. Name the pair. Paths, options and schedules save automatically.
 3. Use **Preview** to inspect planned file changes without writing to the destination.
 4. Choose **Sync now**. Activity shows live output and previous runs; each run has a complete log file.
 
 Click and hold a saved sync’s name or folder icon, then drag it to a new position in the sidebar. Cards shift as you drag, and the order is saved automatically. You can also right-click to rename, delete, launch, pause/resume, or move it up or down. Running syncs show spinning arrows; paused syncs show a pause icon. Rename and delete become available after the active run ends. Pause/resume is also available in the sync screen and menu bar; stopping a paused sync cancels it.
 
-Syncs are one-way. A directory's contents are copied into the destination, without creating an extra enclosing directory. Source files are never removed. Existing destination files can be updated; the default **Skip newer files** option protects newer destination versions. Extra destination files are retained unless you explicitly enable deletion. This is not a bidirectional conflict-resolution tool or a versioned backup system.
+One-way sync copies a directory's contents into the destination without creating an extra enclosing directory. Source files are never removed. The default **Skip newer files** option protects newer destination versions. Extra destination files are retained unless you enable deletion.
+
+Two-way sync requires two folders or mounted volumes and copies in both directions, source to destination first. Newer modification dates win; timestamps and skip-newer are always enabled, and deletion is disabled. Files removed from one side are copied back from the other. Equal-date differences favor the source; enable checksums to detect differing contents with equal sizes and dates. This merges files without keeping conflict copies or backup versions. **Only add new files**, if enabled, skips existing files in both directions. Preview compares each direction independently against the current files, so it can list changes that the first actual pass would resolve before the return pass. Existing saved syncs remain one-way.
 
 The options include timestamps, permissions, symlinks, hard links, Mac metadata, checksums, skip-newer, ignore-existing, partial files, compression, whole-file transfers, filesystem boundaries, exclusions and bandwidth limits. Enabling deletion requires confirmation and also applies to scheduled runs. Excluded destination files are protected. Deletion bypasses the Trash.
 
