@@ -211,21 +211,20 @@ final class AppStore: ObservableObject {
                             itemsChecked = checkedPaths.count
                             currentItem = item.path
                             if itemsTotal > 0 { progress = min(1, Double(itemsChecked) / Double(itemsTotal)) }
-                            progressDetail = itemsTotal > 0
-                                ? "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items checked"
-                                : "\(itemsChecked.formatted()) items checked"
+                            progressDetail = itemProgressDetail()
                         }
                         let parsed = preview ? TransferProgress.comparison(line) : TransferProgress.parse(line)
                         if let parsed {
                             fileListStartedAt = nil
+                            if !preview { isTransferring = true }
                             if preview || itemsTotal == 0 {
                                 progress = parsed.fraction
                                 progressDetail = parsed.detail
                             } else {
-                                // The bar tracks items across the whole run; the current file's transfer is described in text.
-                                progressDetail = "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items · \(parsed.detail)"
+                                // The bar and label track items across the whole run, so a
+                                // transfer line only marks that copying has begun.
+                                progressDetail = itemProgressDetail()
                             }
-                            if !preview { isTransferring = true }
                         }
                     }
                 case .finished(let code, let cancelled):
@@ -273,6 +272,12 @@ final class AppStore: ObservableObject {
         }
         volumes.refresh()
         save()
+    }
+
+    // One steady sentence: per-file rates would rewrite this line between items and flicker.
+    private func itemProgressDetail() -> String {
+        let count = itemsTotal > 0 ? "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items" : "\(itemsChecked.formatted()) items"
+        return "\(count) \(isTransferring ? "processed" : "checked")"
     }
 
     private func resetItemProgress() {
