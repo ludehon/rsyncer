@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var renameText = ""
     @State private var deleteID: UUID?
     @State private var launchID: UUID?
-    @State private var detailTab = PairDetailView.DetailTab.options
+    @State private var detailTab = PairDetailView.DetailTab.activity
     @State private var draggedPairID: UUID?
     @State private var rowFrames: [UUID: CGRect] = [:]
     @State private var dragSlots: [CGRect] = []
@@ -46,7 +46,7 @@ struct ContentView: View {
         .frame(minWidth: 980, minHeight: 720)
         .tint(Palette.accent)
         .onChange(of: store.selectedID) { _, selectedID in
-            detailTab = selectedID == store.activePairID ? .activity : .options
+            detailTab = .activity
         }
         .sheet(isPresented: $showSettings) { AppSettingsView().environmentObject(store) }
         .alert("Rename saved sync", isPresented: Binding(get: { renameID != nil }, set: { if !$0 { renameID = nil } })) {
@@ -263,7 +263,7 @@ struct ContentView: View {
     }
 
     private func selectSavedPair(_ pair: SyncPair) {
-        detailTab = store.activePairID == pair.id ? .activity : .options
+        detailTab = .activity
         store.selectedID = pair.id
         store.showingVolumes = false
     }
