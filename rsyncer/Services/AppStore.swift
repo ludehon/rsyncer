@@ -34,7 +34,6 @@ final class AppStore: ObservableObject {
     let dataDirectory: URL
     let logsDirectory: URL
     private var runner: RsyncRunner?
-    private var checkedPaths = Set<String>()
     private var timer: Timer?
     private var pendingMounts: Set<UUID> = []
     private var retryAfter: [UUID: Date] = [:]
@@ -98,8 +97,14 @@ final class AppStore: ObservableObject {
         guard let index = pairs.firstIndex(where: { $0.id == pair.id }), activePairID != pair.id else { return }
         var updated = pair
         updated.direction = pairs[index].direction
-        if pair.source != pairs[index].source { updated.sourceVolumeID = RsyncCommand.volumeID(for: pair.source) }
-        if pair.destination != pairs[index].destination { updated.destinationVolumeID = RsyncCommand.volumeID(for: pair.destination) }
+        if pair.source != pairs[index].source {
+            updated.sourceVolumeID = RsyncCommand.volumeID(for: pair.source)
+            updated.sourceMountPath = RsyncCommand.mountPath(for: pair.source)
+        }
+        if pair.destination != pairs[index].destination {
+            updated.destinationVolumeID = RsyncCommand.volumeID(for: pair.destination)
+            updated.destinationMountPath = RsyncCommand.mountPath(for: pair.destination)
+        }
         if pair.schedule != pairs[index].schedule {
             updated.nextRun = pair.schedule.nextDate(after: Date())
             pendingMounts.remove(pair.id)
@@ -112,8 +117,8 @@ final class AppStore: ObservableObject {
 
     func setLocation(_ url: URL, source: Bool, pairID: UUID) {
         guard var pair = pairs.first(where: { $0.id == pairID }) else { return }
-        if source { pair.source = url.path; pair.sourceVolumeID = RsyncCommand.volumeID(for: url.path) }
-        else { pair.destination = url.path; pair.destinationVolumeID = RsyncCommand.volumeID(for: url.path) }
+        if source { pair.source = url.path; pair.sourceVolumeID = RsyncCommand.volumeID(for: url.path); pair.sourceMountPath = RsyncCommand.mountPath(for: url.path) }
+        else { pair.destination = url.path; pair.destinationVolumeID = RsyncCommand.volumeID(for: url.path); pair.destinationMountPath = RsyncCommand.mountPath(for: url.path) }
         if pair.name == "Untitled sync" || pair.name == "My first sync", source { pair.name = url.lastPathComponent }
         update(pair)
     }
@@ -181,52 +186,17 @@ final class AppStore: ObservableObject {
         let worker = RsyncRunner()
         runner = worker
         Task {
-            for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: heading) {
+            for await event in worker.runDisplay(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: heading, preview: preview) {
                 switch event {
-                case .output(let chunk):
-                    let text = chunk.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-                    output += text.components(separatedBy: "\n").filter { !RsyncOutput.isDebugLine($0) }.joined(separator: "\n")
-                    if output.utf8.count > 160_000 { output = String(output.suffix(100_000)) }
-                    for line in chunk.components(separatedBy: .newlines) {
-                        if line == "Pass 1/2: Source → Destination" || line == "Pass 2/2: Destination → Source" {
-                            progress = nil
-                            fileListStartedAt = Date()
-                            progressDetail = "Preparing sync…"
-                            resetItemProgress()
-                        }
-                        if let list = FileListProgress.parse(line) {
-                            progress = nil
-                            if list.complete {
-                                fileListStartedAt = nil
-                                if !preview { itemsTotal = list.count }
-                                progressDetail = preview
-                                    ? "Checking \(list.count.formatted()) files and folders for changes…"
-                                    : "\(list.count.formatted()) items found. Preparing destination and checking changes…"
-                            } else {
-                                progressDetail = "Scanning · \(list.count.formatted()) items found"
-                            }
-                        }
-                        if !preview, let item = ProcessedItem.parse(line), checkedPaths.insert(item.path).inserted {
-                            fileListStartedAt = nil
-                            itemsChecked = checkedPaths.count
-                            currentItem = item.path
-                            if itemsTotal > 0 { progress = min(1, Double(itemsChecked) / Double(itemsTotal)) }
-                            progressDetail = itemProgressDetail()
-                        }
-                        let parsed = preview ? TransferProgress.comparison(line) : TransferProgress.parse(line)
-                        if let parsed {
-                            fileListStartedAt = nil
-                            if !preview { isTransferring = true }
-                            if preview || itemsTotal == 0 {
-                                progress = parsed.fraction
-                                progressDetail = parsed.detail
-                            } else {
-                                // The bar and label track items across the whole run, so a
-                                // transfer line only marks that copying has begun.
-                                progressDetail = itemProgressDetail()
-                            }
-                        }
-                    }
+                case .update(let snapshot):
+                    if output != snapshot.output { output = snapshot.output }
+                    if progress != snapshot.progress { progress = snapshot.progress }
+                    if progressDetail != snapshot.detail { progressDetail = snapshot.detail }
+                    if fileListStartedAt != snapshot.scanningSince { fileListStartedAt = snapshot.scanningSince }
+                    if itemsTotal != snapshot.itemsTotal { itemsTotal = snapshot.itemsTotal }
+                    if itemsChecked != snapshot.itemsChecked { itemsChecked = snapshot.itemsChecked }
+                    if currentItem != snapshot.currentItem { currentItem = snapshot.currentItem }
+                    if isTransferring != snapshot.isTransferring { isTransferring = snapshot.isTransferring }
                 case .finished(let code, let cancelled):
                     finish(pair: pair, started: started, preview: preview, code: code, cancelled: cancelled, logURL: logURL)
                 case .failed(let message):
@@ -261,7 +231,6 @@ final class AppStore: ObservableObject {
         progress = record.succeeded ? 1 : nil
         currentItem = ""
         isTransferring = false
-        checkedPaths.removeAll()
         activePairID = nil
         runner = nil
         cancelling = false
@@ -274,14 +243,7 @@ final class AppStore: ObservableObject {
         save()
     }
 
-    // One steady sentence: per-file rates would rewrite this line between items and flicker.
-    private func itemProgressDetail() -> String {
-        let count = itemsTotal > 0 ? "\(itemsChecked.formatted()) of \(itemsTotal.formatted()) items" : "\(itemsChecked.formatted()) items"
-        return "\(count) \(isTransferring ? "processed" : "checked")"
-    }
-
     private func resetItemProgress() {
-        checkedPaths.removeAll()
         itemsChecked = 0
         itemsTotal = 0
         currentItem = ""

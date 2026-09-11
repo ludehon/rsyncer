@@ -40,6 +40,8 @@ The scheduler runs one job at a time. The app prevents idle sleep during transfe
 
 Allow access to files and folders when macOS prompts you. Protected locations may require **Full Disk Access**.
 
+Volumes are matched by mount path by default, so Cryptomator vaults can reconnect even when their UUID changes. The volume must still be mounted at the saved location; another volume mounted there will also be accepted. Enable **Match volumes by UUID** in Sync options to additionally require the saved UUID. Existing syncs under `/Volumes` use mount-path matching automatically; older syncs at custom mount locations retain UUID checks until you choose their folders again.
+
 The app rejects missing, overlapping, or unsafe locations before a run. Cancellation may leave partial files at the destination.
 
 Settings and logs are stored in:

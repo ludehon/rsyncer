@@ -7,6 +7,90 @@ enum RunEvent: Sendable {
     case failed(String)
 }
 
+enum RunDisplayEvent: Sendable {
+    case update(RunDisplayState)
+    case finished(Int32, Bool)
+    case failed(String)
+}
+
+/// Absolute snapshots let the UI skip stale frames without losing item counts.
+struct RunDisplayState: Sendable {
+    var output: String
+    var progress: Double?
+    var detail = "Preparing sync…"
+    var scanningSince: Date? = Date()
+    var itemsTotal = 0
+    var itemsChecked = 0
+    var currentItem = ""
+    var isTransferring = false
+}
+
+/// Owned by the background consumer; no per-file parsing or sets reach the UI.
+struct RunDisplayAccumulator {
+    var state: RunDisplayState
+    private var checkedPaths = Set<String>()
+    private var lastEmission: TimeInterval = -.infinity
+    let preview: Bool
+
+    init(heading: String, preview: Bool) {
+        state = RunDisplayState(output: heading)
+        self.preview = preview
+    }
+
+    mutating func consume(_ chunk: String) {
+        let clean = RsyncOutput.strippingDebugLines(Data(chunk.utf8))
+        state.output += String(decoding: clean, as: UTF8.self)
+            .replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        if state.output.utf8.count > 160_000 { state.output = String(state.output.suffix(100_000)) }
+        for line in chunk.components(separatedBy: .newlines) {
+            if line == "Pass 1/2: Source → Destination" || line == "Pass 2/2: Destination → Source" {
+                state = RunDisplayState(output: state.output)
+                checkedPaths.removeAll(keepingCapacity: true)
+            }
+            if let list = FileListProgress.parse(line) {
+                state.progress = nil
+                if list.complete {
+                    state.scanningSince = nil
+                    if !preview { state.itemsTotal = list.count }
+                    state.detail = preview
+                        ? "Checking \(list.count.formatted()) files and folders for changes…"
+                        : "\(list.count.formatted()) items found. Preparing destination and checking changes…"
+                } else {
+                    state.detail = "Scanning · \(list.count.formatted()) items found"
+                }
+            }
+            if !preview, let item = ProcessedItem.parse(line), checkedPaths.insert(item.path).inserted {
+                state.scanningSince = nil
+                state.itemsChecked = checkedPaths.count
+                state.currentItem = item.path
+                if state.itemsTotal > 0 { state.progress = min(1, Double(state.itemsChecked) / Double(state.itemsTotal)) }
+                updateItemDetail()
+            }
+            if let parsed = preview ? TransferProgress.comparison(line) : TransferProgress.parse(line) {
+                state.scanningSince = nil
+                if !preview { state.isTransferring = true }
+                if preview || state.itemsTotal == 0 {
+                    state.progress = parsed.fraction
+                    state.detail = parsed.detail
+                } else {
+                    updateItemDetail()
+                }
+            }
+        }
+    }
+
+    mutating func snapshot(at time: TimeInterval, force: Bool = false) -> RunDisplayState? {
+        guard force || time - lastEmission >= 0.1 else { return nil }
+        lastEmission = time
+        return state
+    }
+
+    private mutating func updateItemDetail() {
+        let count = state.itemsTotal > 0 ? "\(state.itemsChecked.formatted()) of \(state.itemsTotal.formatted()) items" : "\(state.itemsChecked.formatted()) items"
+        state.detail = "\(count) \(state.isTransferring ? "processed" : "checked")"
+    }
+}
+
 /// A terminal makes rsync flush status lines as it does in Terminal, including
 /// the file-list heading before a slow destination metadata pass.
 private final class RsyncOutputTerminal {
@@ -116,10 +200,36 @@ final class RsyncRunner: @unchecked Sendable {
         run(passes: [arguments], logURL: logURL, heading: heading)
     }
 
+    func runDisplay(passes: [[String]], logURL: URL, heading: String, preview: Bool) -> AsyncStream<RunDisplayEvent> {
+        // Only display snapshots may be dropped. The last snapshot and terminal
+        // event both fit even when the main thread has stopped consuming frames.
+        AsyncStream(bufferingPolicy: .bufferingNewest(2)) { continuation in
+            Task.detached(priority: .userInitiated) { [self] in
+                var display = RunDisplayAccumulator(heading: heading, preview: preview)
+                for await event in run(passes: passes, logURL: logURL, heading: heading) {
+                    switch event {
+                    case .output(let chunk):
+                        display.consume(chunk)
+                        if let snapshot = display.snapshot(at: ProcessInfo.processInfo.systemUptime) {
+                            continuation.yield(.update(snapshot))
+                        }
+                    case .finished(let code, let cancelled):
+                        continuation.yield(.update(display.snapshot(at: ProcessInfo.processInfo.systemUptime, force: true)!))
+                        continuation.yield(.finished(code, cancelled))
+                    case .failed(let message):
+                        continuation.yield(.update(display.snapshot(at: ProcessInfo.processInfo.systemUptime, force: true)!))
+                        continuation.yield(.failed(message))
+                    }
+                }
+                continuation.finish()
+            }
+        }
+    }
+
     func run(passes: [[String]], logURL: URL, heading: String) -> AsyncStream<RunEvent> {
-        // Logs are written before yielding. Slow UI consumers may skip old display
-        // batches without losing any on-disk output or the final completion event.
-        AsyncStream(bufferingPolicy: .bufferingNewest(128)) { continuation in
+        // Raw events are lossless: the background accumulator must see every item.
+        // Only its bounded, cumulative display snapshots can be discarded.
+        AsyncStream { continuation in
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 do {
                     try Data(heading.utf8).write(to: logURL, options: .atomic)

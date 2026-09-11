@@ -1,10 +1,16 @@
 import Foundation
 
 struct SyncOptions: Codable, Equatable {
+    // Optional storage keeps settings from older releases decodable.
+    var savedMatchVolumesByUUID: Bool?
+    var matchVolumesByUUID: Bool {
+        get { savedMatchVolumesByUUID ?? false }
+        set { savedMatchVolumesByUUID = newValue }
+    }
     var preserveTimes = true
     var preservePermissions = false
     var preserveLinks = true
-    var extendedAttributes = true
+    var extendedAttributes = false
     var checksum = false
     var skipNewer = true
     var ignoreExisting = false
@@ -61,6 +67,8 @@ struct SyncPair: Identifiable, Codable, Equatable {
     var name = "Untitled sync"
     var source = ""
     var destination = ""
+    var sourceMountPath: String?
+    var destinationMountPath: String?
     var sourceVolumeID: String?
     var destinationVolumeID: String?
     // Missing in settings saved before direction selection was introduced.

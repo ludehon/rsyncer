@@ -38,11 +38,15 @@ struct SyncOptionsView: View {
                 }
             }
 
+            OptionsSection(title: "Volume matching", symbol: "externaldrive") {
+                OptionRow(title: "Match volumes by UUID", detail: "Off by default: match the mounted volume’s path so encrypted vaults can reconnect. Enable to also require the saved volume UUID. Mount paths accept any volume mounted at that location.", value: $options.matchVolumesByUUID)
+            }
+
             OptionsSection(title: "File details", symbol: "doc.text") {
                 OptionRow(title: "Preserve timestamps", detail: twoWay ? "Always on for two-way sync so newer versions can be identified." : "Keep the original modification dates on copied files.", value: twoWay ? .constant(true) : $options.preserveTimes)
                     .disabled(twoWay)
                 Divider()
-                OptionRow(title: "Keep Mac metadata", detail: "Copy extended attributes and resource forks. These are not checked in Preview.", value: $options.extendedAttributes)
+                OptionRow(title: "Keep Mac metadata", detail: "Copy Finder tags, extended attributes and resource forks. Can slow syncing on network or encrypted volumes. Off by default; not checked in Preview. Metadata stored inside files, such as photo EXIF, is always copied with the file.", value: $options.extendedAttributes)
                 Divider()
                 OptionRow(title: "Preserve symbolic links", detail: "Copy links as links, rather than copying the files they point to.", value: $options.preserveLinks)
             }

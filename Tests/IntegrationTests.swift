@@ -45,6 +45,34 @@ struct IntegrationTests {
         }
 
         let durationStart = Date(timeIntervalSinceReferenceDate: 0)
+        try expect(!SyncOptions().extendedAttributes, "New syncs default to no Mac metadata")
+        for enabled in [false, true] {
+            var saved = SyncOptions()
+            saved.extendedAttributes = enabled
+            let decoded = try JSONDecoder().decode(SyncOptions.self, from: JSONEncoder().encode(saved))
+            try expect(decoded.extendedAttributes == enabled, "Saved metadata choice survives decoding")
+            var configured = SyncPair(source: source.path, destination: destination.path)
+            configured.options = decoded
+            try expect(RsyncCommand.arguments(for: configured, preview: false).contains("--extended-attributes") == enabled, "Sync respects the metadata choice")
+            try expect(!RsyncCommand.arguments(for: configured, preview: true).contains("--extended-attributes"), "Preview still omits Mac metadata")
+        }
+
+        var display = RunDisplayAccumulator(heading: "Test\n", preview: false)
+        display.consume("Transfer starting: 2000 files\n")
+        try expect(display.snapshot(at: 0) != nil, "First progress snapshot is immediate")
+        for index in 0..<2000 {
+            display.consume("rsync(42): : photo-\(index).ARW: skipping: up to date\n")
+        }
+        display.consume(".f        photo-1999.ARW\n")
+        try expect(display.snapshot(at: 0.05) == nil, "A burst does not publish per-item UI updates")
+        let burst = display.snapshot(at: 0.1)
+        try expect(burst?.itemsChecked == 2000 && burst?.progress == 1, "Batched progress counts every unique item")
+        try expect(burst?.currentItem == "photo-1999.ARW" && burst?.output.contains("skipping: up to date") == false, "Snapshots retain latest item and omit diagnostics")
+        display.consume("Pass 2/2: Destination → Source\nTransfer starting: 2 files\n.f        photo-1999.ARW\n")
+        let finalSnapshot = display.snapshot(at: 0.11, force: true)
+        try expect(finalSnapshot?.itemsChecked == 1 && finalSnapshot?.itemsTotal == 2, "Second pass resets counts and deduplication")
+        try expect(finalSnapshot?.progress == 0.5, "Completion flushes changes within the throttle interval")
+
         var durationRecord = RunRecord(pairID: UUID(), pairName: "Duration", startedAt: durationStart, finishedAt: durationStart.addingTimeInterval(59), preview: false, exitCode: 0, cancelled: false, logPath: "")
         try expect(durationRecord.durationLabel == "59s", "Short run durations remain in seconds")
         durationRecord.finishedAt = durationStart.addingTimeInterval(60)
@@ -107,6 +135,7 @@ struct IntegrationTests {
         pair.options.skipNewer = false
         pair.options.checksum = true
         pair.options.preservePermissions = true
+        pair.options.extendedAttributes = true
         pair.options.preserveHardLinks = true
         pair.options.wholeFile = true
         pair.options.compress = true
@@ -127,7 +156,39 @@ struct IntegrationTests {
         try expectInvalid(invalid, "Symlink aliases cannot bypass overlap checks")
         invalid = pair
         invalid.sourceVolumeID = "wrong-volume"
-        try expectInvalid(invalid, "Wrong volume identity rejected")
+        invalid.sourceMountPath = RsyncCommand.mountPath(for: source.path)
+        invalid.destinationMountPath = RsyncCommand.mountPath(for: destination.path)
+        try expect(invalid.sourceMountPath != nil, "Fixture volume has a mount root")
+        try expect(!invalid.options.matchVolumesByUUID, "Mount-path matching is the default")
+        try RsyncCommand.validate(invalid)
+        print("PASS: Remounted volume with a changed UUID is accepted by mount path")
+        invalid.options.matchVolumesByUUID = true
+        try expectInvalid(invalid, "UUID mode rejects a changed volume identity")
+        invalid.options.matchVolumesByUUID = false
+        invalid.sourceMountPath = source.path
+        try expectInvalid(invalid, "Existing ordinary folder cannot replace an unmounted source volume")
+        invalid.sourceMountPath = RsyncCommand.mountPath(for: source.path)
+        invalid.destinationMountPath = destination.path
+        try expectInvalid(invalid, "Existing ordinary folder cannot replace an unmounted destination volume")
+        invalid.sourceMountPath = nil
+        invalid.destinationMountPath = nil
+        try expectInvalid(invalid, "Legacy custom locations retain UUID protection")
+        try expect(RsyncCommand.legacyMountPath(for: "/Volumes/vault/photos") == "/Volumes/vault", "Legacy vault paths recover their mount root")
+        try expect(RsyncCommand.legacyMountPath(for: "/Volumes/vault") == "/Volumes/vault", "Legacy volume-root selections recover their mount root")
+        try expect(RsyncCommand.legacyMountPath(for: source.path) == nil, "Local folders are not inferred as mount roots")
+        var legacyMountJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pair)) as! [String: Any]
+        legacyMountJSON.removeValue(forKey: "sourceMountPath")
+        legacyMountJSON.removeValue(forKey: "destinationMountPath")
+        var legacyOptions = legacyMountJSON["options"] as! [String: Any]
+        legacyOptions.removeValue(forKey: "savedMatchVolumesByUUID")
+        legacyMountJSON["options"] = legacyOptions
+        let legacyPair = try JSONDecoder().decode(SyncPair.self, from: JSONSerialization.data(withJSONObject: legacyMountJSON))
+        try expect(!legacyPair.options.matchVolumesByUUID, "Older saved syncs decode with mount-path mode")
+        var savedPair = pair
+        savedPair.options.matchVolumesByUUID = true
+        savedPair.sourceMountPath = RsyncCommand.mountPath(for: source.path)
+        let decodedPair = try JSONDecoder().decode(SyncPair.self, from: JSONEncoder().encode(savedPair))
+        try expect(decodedPair.options.matchVolumesByUUID && decodedPair.sourceMountPath == savedPair.sourceMountPath, "UUID preference and mount root persist")
         invalid = pair
         invalid.destination = root.appendingPathComponent("disconnected").path
         try expectInvalid(invalid, "Missing destination rejected without creating directories")

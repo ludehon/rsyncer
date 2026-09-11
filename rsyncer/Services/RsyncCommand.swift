@@ -34,18 +34,38 @@ enum RsyncCommand {
         return try? url(for: path).resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
     }
 
+    static func mountPath(for path: String) -> String? {
+        guard !path.isEmpty,
+              let values = try? url(for: path).resourceValues(forKeys: [.volumeURLKey]) else { return nil }
+        return values.volume?.standardizedFileURL.path
+    }
+
+    // Older settings have UUIDs but no saved mount roots. Recover the root for
+    // conventional macOS volume paths without trusting the currently mounted disk.
+    static func legacyMountPath(for path: String) -> String? {
+        let components = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.pathComponents
+        guard components.count >= 3, components[1] == "Volumes" else { return nil }
+        return "/Volumes/" + components[2]
+    }
+
     static func validate(_ pair: SyncPair) throws {
         let fm = FileManager.default
-        for (path, expectedID, label) in [(pair.source, pair.sourceVolumeID, "Source"), (pair.destination, pair.destinationVolumeID, "Destination")] {
+        for (path, expectedID, savedMountPath, label) in [(pair.source, pair.sourceVolumeID, pair.sourceMountPath, "Source"), (pair.destination, pair.destinationVolumeID, pair.destinationMountPath, "Destination")] {
             guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   path.hasPrefix("/") || path.hasPrefix("~/") else {
                 throw SyncError.invalid("\(label) needs an absolute path. Choose a location or enter a path beginning with / or ~/.")
             }
             guard fm.fileExists(atPath: url(for: path).path) else {
-                throw SyncError.invalid("\(label) is unavailable. Connect its drive and check the path.")
+                throw SyncError.invalid("\(label) is unavailable. Connect its drive or unlock its vault, then check the path.")
             }
-            if let expectedID, volumeID(for: path) != expectedID {
-                throw SyncError.invalid("\(label) is on a different volume than the one you saved. Choose the location again to use this drive.")
+            let expectedMountPath = savedMountPath ?? legacyMountPath(for: path)
+            if let expectedMountPath, mountPath(for: path) != expectedMountPath {
+                throw SyncError.invalid("\(label)'s volume is not mounted at \(expectedMountPath). Connect its drive or unlock its vault before syncing.")
+            }
+            // Fall back to UUID for older settings whose mount root is unknown.
+            if pair.options.matchVolumesByUUID || expectedMountPath == nil,
+               let expectedID, volumeID(for: path) != expectedID {
+                throw SyncError.invalid("\(label)'s volume identity has changed. An encrypted vault may receive a new UUID after unlocking. Choose the location again to use this volume.")
             }
         }
         let source = url(for: pair.source)
@@ -125,6 +145,7 @@ enum RsyncCommand {
             var reverse = pair
             swap(&reverse.source, &reverse.destination)
             swap(&reverse.sourceVolumeID, &reverse.destinationVolumeID)
+            swap(&reverse.sourceMountPath, &reverse.destinationMountPath)
             passes.append(arguments(for: reverse, preview: preview))
         }
         return passes
