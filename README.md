@@ -20,6 +20,8 @@ A native macOS app for syncing files and folders between local drives and mounte
 
 ## Using rsyncer
 
+To install from a DMG, open it, drag **Rsyncer** onto **Applications**, then eject the disk image and launch Rsyncer from Applications.
+
 1. Click **+** beside **Saved syncs** and choose a one-way or two-way sync.
 2. Drop in the source and destination, or browse to them, then choose the transfer options and schedule.
 3. Select **Preview** to review the plan, then **Sync now** to run it.
@@ -46,3 +48,31 @@ Settings and logs are stored in:
 ~/Library/Application Support/rsyncer/state.json
 ~/Library/Application Support/rsyncer/Logs/
 ```
+
+## Building a DMG
+
+With Xcode installed and selected as the active developer directory, run:
+
+```sh
+./scripts/build-dmg.sh
+```
+
+This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.0.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut for drag-and-drop installation. Running the command again replaces the DMG for that version.
+
+The default build is ad hoc signed for local testing. For public downloads that pass macOS Gatekeeper, use a **Developer ID Application** certificate and Apple notarization, which require Apple Developer Program membership. In Xcode, choose **Product → Archive**, then distribute the archive using **Developer ID**, upload it for notarization, and export the notarized app. Package that export with:
+
+```sh
+./scripts/build-dmg.sh /path/to/export/Rsyncer.app
+```
+
+The script preserves the exported app's signature and notarization ticket. To also sign and notarize the DMG, use your Developer ID identity and a previously configured `notarytool` keychain profile:
+
+```sh
+codesign --timestamp --sign 'Developer ID Application: Your Name (TEAMID)' build/Rsyncer-1.0.dmg
+xcrun notarytool submit build/Rsyncer-1.0.dmg --keychain-profile 'rsyncer-notary' --wait
+# Continue only after the submission status is Accepted.
+xcrun stapler staple build/Rsyncer-1.0.dmg
+xcrun stapler validate build/Rsyncer-1.0.dmg
+```
+
+See Apple's [notarization instructions](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) for certificate and credential setup. Test the downloaded DMG on another Mac before publishing a release.
