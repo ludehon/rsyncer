@@ -226,7 +226,7 @@ struct SyncPreviewView: View {
         // One card for the pair: each location appears once, on its own side, with an arrow per direction.
         let twoWay = preview.pair.direction == .twoWay
         return HStack(spacing: 18) {
-            endpoint(preview.pair.source, title: twoWay ? "SOURCE" : "FROM",
+            endpoint(preview.pair.source, title: twoWay ? "SOURCE 1" : "FROM",
                      volume: false, sending: true, receiving: twoWay)
             VStack(spacing: 10) {
                 flow(preview, reversed: false)
@@ -236,7 +236,7 @@ struct SyncPreviewView: View {
                     .multilineTextAlignment(.center)
             }.frame(width: 135, alignment: .center)
                 .help("Size of added and updated files in each direction. Excludes deletions, folders and links; actual transferred bytes may differ.")
-            endpoint(preview.pair.destination, title: twoWay ? "DESTINATION" : "TO",
+            endpoint(preview.pair.destination, title: twoWay ? "SOURCE 2" : "TO",
                      volume: true, sending: twoWay, receiving: true)
         }
         .padding(18)

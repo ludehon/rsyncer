@@ -41,14 +41,28 @@ struct PairDetailView: View {
                         }
                 }
                 HStack(spacing: 12) {
-                    LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
+                    LocationCard(
+                        title: pair.direction == .twoWay ? "SOURCE 1" : "SOURCE",
+                        subtitle: pair.direction == .twoWay ? "The first location to keep in sync" : "The files you want to bring along",
+                        path: binding.source,
+                        source: true,
+                        locationName: pair.direction == .twoWay ? "Source 1" : "Source",
+                        pairID: pairID
+                    )
                     Image(systemName: pair.direction.symbol)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(Palette.accentInk)
                         .frame(width: 30, height: 30)
                         .background(Palette.accent.opacity(0.08), in: Circle())
                         .accessibilityLabel(pair.direction.title)
-                    LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
+                    LocationCard(
+                        title: pair.direction == .twoWay ? "SOURCE 2" : "DESTINATION",
+                        subtitle: pair.direction == .twoWay ? "The second location to keep in sync" : "The place they’ll call home",
+                        path: binding.destination,
+                        source: false,
+                        locationName: pair.direction == .twoWay ? "Source 2" : "Destination",
+                        pairID: pairID
+                    )
                 }.disabled(locked)
                 HStack(spacing: 16) {
                     DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
@@ -205,6 +219,7 @@ struct LocationCard: View {
     var subtitle: String
     @Binding var path: String
     var source: Bool
+    var locationName: String
     var pairID: UUID
     @State private var targeted = false
     @State private var hovering = false
@@ -238,7 +253,7 @@ struct LocationCard: View {
                             .background(Palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
+                    .accessibilityLabel(path.isEmpty ? "Choose \(locationName)" : "Open \(locationName) in Finder")
                     .help(path.isEmpty ? "Choose a location" : "Open in Finder")
                     if !path.isEmpty && hovering {
                         Button { path = "" } label: {
@@ -250,8 +265,8 @@ struct LocationCard: View {
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(source ? "Clear source" : "Clear destination")
-                        .help(source ? "Clear source" : "Clear destination")
+                        .accessibilityLabel("Clear \(locationName)")
+                        .help("Clear \(locationName)")
                         .offset(x: -5, y: -3)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }
@@ -272,7 +287,7 @@ struct LocationCard: View {
                 TextField("Or type an absolute path…", text: $path).textFieldStyle(.plain)
                     .font(.system(size: 10, design: .monospaced)).lineLimit(1)
                     .focused($pathIsFocused)
-                    .accessibilityLabel(source ? "Source path" : "Destination path")
+                    .accessibilityLabel("\(locationName) path")
             }.padding(9).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 5))
             if !path.isEmpty {
                 LocationStorageView(monitor: store.volumes, path: path)

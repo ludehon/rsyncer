@@ -238,10 +238,11 @@ final class AppStore: ObservableObject {
 
     func chooseLocation(source: Bool, pairID: UUID) {
         let panel = NSOpenPanel()
+        let isTwoWay = pairs.first(where: { $0.id == pairID })?.direction == .twoWay
         panel.canChooseDirectories = true
-        panel.canChooseFiles = source && pairs.first(where: { $0.id == pairID })?.direction != .twoWay
+        panel.canChooseFiles = source && !isTwoWay
         panel.allowsMultipleSelection = false
-        panel.prompt = source ? "Choose source" : "Choose destination"
+        panel.prompt = isTwoWay ? "Choose Source \(source ? 1 : 2)" : (source ? "Choose source" : "Choose destination")
         if panel.runModal() == .OK, let url = panel.url { setLocation(url, source: source, pairID: pairID) }
     }
 
