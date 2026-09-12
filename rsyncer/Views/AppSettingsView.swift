@@ -28,6 +28,22 @@ struct AppSettingsView: View {
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
+                Text("Notifications").font(.system(size: 13, weight: .semibold))
+                Toggle("Allow sync notifications", isOn: Binding(get: { store.notificationsEnabled }, set: store.setNotificationsEnabled))
+                    .toggleStyle(.switch)
+                Toggle("Notify after successful syncs", isOn: $store.notifyOnSuccess)
+                    .disabled(!store.notificationsEnabled)
+                Toggle("Notify when a scheduled sync is overdue", isOn: $store.notifyWhenOverdue)
+                    .disabled(!store.notificationsEnabled)
+                Stepper("Overdue after \(store.overdueDays) \(store.overdueDays == 1 ? "day" : "days")", value: $store.overdueDays, in: 1...30)
+                    .disabled(!store.notificationsEnabled || !store.notifyWhenOverdue)
+            }
+            .font(.system(size: 12))
+            .onChange(of: store.notifyOnSuccess) { _, _ in store.saveNotificationPreferences() }
+            .onChange(of: store.notifyWhenOverdue) { _, _ in store.saveNotificationPreferences() }
+            .onChange(of: store.overdueDays) { _, _ in store.saveNotificationPreferences() }
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
                 Text("Theme").font(.system(size: 13, weight: .semibold))
                 HStack(spacing: 12) {
                     ForEach(AppTheme.allCases) { theme in

@@ -244,6 +244,33 @@ struct IntegrationTests {
         legacyJSON.removeValue(forKey: "savedDirection")
         let legacy = try JSONDecoder().decode(SyncPair.self, from: JSONSerialization.data(withJSONObject: legacyJSON))
         try expect(legacy.direction == .oneWay, "Existing saved syncs default to one-way")
+        try expect(legacy.options.conflictPolicy == .keepBoth && legacy.schedule.intervalMinutes == 30 && legacy.schedule.weekdays.count == 5,
+                   "Existing saved syncs receive safe conflict and schedule defaults")
+
+        let conflictSource = root.appendingPathComponent("conflict-source")
+        let conflictDestination = root.appendingPathComponent("conflict-destination")
+        try fm.createDirectory(at: conflictSource, withIntermediateDirectories: true)
+        try fm.createDirectory(at: conflictDestination, withIntermediateDirectories: true)
+        try write("shared.txt", "baseline", to: conflictSource)
+        try write("shared.txt", "baseline", to: conflictDestination)
+        let baselineDate = Date().addingTimeInterval(-60)
+        try fm.setAttributes([.modificationDate: baselineDate], ofItemAtPath: conflictSource.appendingPathComponent("shared.txt").path)
+        try fm.setAttributes([.modificationDate: baselineDate], ofItemAtPath: conflictDestination.appendingPathComponent("shared.txt").path)
+        var conflictPair = SyncPair(name: "Conflicts", source: conflictSource.path, destination: conflictDestination.path)
+        conflictPair.direction = .twoWay
+        conflictPair.options.conflictPolicy = .keepBoth
+        let manifest = root.appendingPathComponent("conflict-manifest.json")
+        try ConflictTracker.saveManifest(for: conflictPair, to: manifest)
+        try write("shared.txt", "source edit", to: conflictSource)
+        try write("shared.txt", "destination edit", to: conflictDestination)
+        try fm.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: conflictSource.appendingPathComponent("shared.txt").path)
+        try fm.setAttributes([.modificationDate: Date().addingTimeInterval(120)], ofItemAtPath: conflictDestination.appendingPathComponent("shared.txt").path)
+        let conflicts = ConflictTracker.conflicts(for: conflictPair, manifestURL: manifest)
+        try expect(conflicts.map(\.relativePath) == ["shared.txt"], "Two-way edits to the same file are detected from the saved baseline")
+        try ConflictTracker.resolve(conflicts, for: conflictPair)
+        let canonical = try String(contentsOf: conflictDestination.appendingPathComponent("shared.txt"), encoding: .utf8)
+        let preservedConflict = try String(contentsOf: conflictDestination.appendingPathComponent("shared (conflict from Destination).txt"), encoding: .utf8)
+        try expect(canonical == "source edit" && preservedConflict == "destination edit", "Keep-both resolution preserves both conflicting versions")
 
         try expect(TransferProgress.parse(" 1,024  42%  1.2MB/s 0:00:03")?.fraction == 0.42, "Per-file progress parsed")
         let comparison = TransferProgress.comparison("0  0%  00:00:00 (xfer#6480, to-check=16579/18319)", countsCompleted: true)
@@ -340,14 +367,23 @@ struct IntegrationTests {
         try expect(daily.nextDate(after: now, calendar: calendar) == calendar.date(from: DateComponents(year: 2026, month: 9, day: 12, hour: 9)), "Daily schedule advances past today's elapsed time")
         let weekly = SyncSchedule(kind: .weekly, hour: 9, weekday: 2)
         try expect(weekly.nextDate(after: now, calendar: calendar) == calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 9)), "Weekly schedule matches chosen weekday")
+        var interval = SyncSchedule(kind: .interval)
+        interval.intervalMinutes = 15
+        try expect(interval.nextDate(after: now, calendar: calendar) == now.addingTimeInterval(900), "Minute interval schedules use their chosen frequency")
+        var selectedDays = SyncSchedule(kind: .weekdays, hour: 9)
+        selectedDays.weekdays = [2, 4]
+        try expect(selectedDays.nextDate(after: now, calendar: calendar) == calendar.date(from: DateComponents(year: 2026, month: 9, day: 14, hour: 9)), "Selected-weekday schedules choose the next enabled day")
         try expect(SyncSchedule(kind: .manual).nextDate(after: now) == nil, "Manual schedules never become due")
 
         let settings = root.appendingPathComponent("settings")
         let store = AppStore(dataDirectory: settings, enableScheduling: false)
+        try write("history-summary.txt", "summarize me", to: source)
         store.start(pair, preview: true)
         try expect(store.syncPreview?.complete == false, "Visual preview begins in the comparing state")
         while store.isRunning { try await Task.sleep(for: .milliseconds(20)) }
         try expect(store.syncPreview?.complete == true && store.syncPreview?.succeeded == true, "Visual preview loads the completed log into the store")
+        try expect((store.history.first?.summary?.total ?? 0) > 0 && store.history.first?.summary?.details.contains(where: { $0.path == "history-summary.txt" }) == true,
+                   "Run history stores a searchable change summary")
         var saved = store.pairs[0]
         saved.name = "Persisted pair"
         saved.source = source.path
@@ -367,6 +403,13 @@ struct IntegrationTests {
         attemptedDirectionChange.direction = .oneWay
         store.update(attemptedDirectionChange)
         try expect(store.selectedPair?.direction == .twoWay, "Direction chosen at creation cannot be changed by editing a sync")
+        let countBeforeDuplicate = store.pairs.count
+        store.duplicatePair(store.selectedID!)
+        try expect(store.pairs.count == countBeforeDuplicate + 1 && store.selectedPair?.name.hasSuffix(" copy") == true,
+                   "Saved syncs can be duplicated with a new identity")
+        let duplicateID = store.selectedID!
+        store.removePair(duplicateID)
+        store.selectedID = attemptedDirectionChange.id
         let addedID = store.selectedID!
         store.renamePair(addedID, to: "  Second sync  ")
         store.movePair(addedID, by: -1)

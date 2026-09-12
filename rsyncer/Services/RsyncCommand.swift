@@ -125,7 +125,8 @@ enum RsyncCommand {
             (o.preserveHardLinks, "--hard-links"), (preview, "--dry-run")
         ]
         args += flags.filter(\.0).map(\.1)
-        if preview { args.append("--out-format=RSYNCER2|%i|%l|%n") }
+        // Keep itemized output machine-readable for previews and completed-run summaries.
+        args.append("--out-format=RSYNCER2|%i|%l|%n")
         if o.bandwidthLimit > 0 { args.append("--bwlimit=\(o.bandwidthLimit)") }
         if o.excludeHidden { args.append("--exclude=.*") }
         for pattern in o.excludePatterns.components(separatedBy: .newlines) where !pattern.isEmpty {

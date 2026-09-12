@@ -7,14 +7,16 @@ A native macOS app for syncing files and folders between local drives and mounte
 ## Features
 
 - **One-way sync** — Copies a file or a folder's contents to a destination. Optionally protects newer destination files and removes files that no longer exist at the source.
-- **Two-way sync** — Merges two folders in both directions, with the newest version of each file winning.
+- **Two-way sync** — Merges two folders in both directions and detects files changed on both sides since the last successful run. Conflicts can preserve both copies or prefer either location.
 - **Safe previews** — Shows planned additions, updates, and deletions before changing anything, with searchable item details and affected file sizes.
 - **Transfer controls** — Start, pause, resume, or stop a sync and follow its per-file progress in the app, menu bar, or Dock.
-- **Scheduling** — Run saved syncs hourly, daily, weekly, or when a drive connects. Missed timed runs resume when the app is available.
+- **Scheduling** — Run saved syncs at minute intervals, hourly, daily, on selected weekdays, weekly, or when a drive connects. Jobs can wait for external power, and missed timed runs resume when the app is available.
 - **Saved syncs** — Automatically saves paths, options, schedules, names, and sidebar order for repeat use.
 - **Transfer options** — Supports timestamps, permissions, links, Mac metadata, checksums, exclusions, bandwidth limits, partial files, and other common `rsync` controls.
 - **Volume status** — Displays free space, capacity, availability, read-only state, and low-space warnings for connected drives.
-- **History and logs** — Keeps the latest 250 runs in the app and writes a complete log for every run.
+- **History and logs** — Keeps the latest 250 runs with change counts, affected sizes, searchable file details, and a complete log for every run.
+- **Notifications** — Reports failures, optional successful runs, and scheduled syncs that have become overdue.
+- **Portable configurations** — Duplicate saved syncs or export and import them as JSON files.
 - **Menu bar and login launch** — Continues running after the window closes and can launch automatically when you sign in.
 - **Themes** — Includes six accent and sidebar colour themes.
 
@@ -32,7 +34,7 @@ If you enable **Launch at login**, macOS may require approval under **System Set
 
 One-way sync never removes source files. Destination-only files are retained unless deletion is explicitly enabled. Deletion applies to scheduled runs and bypasses the Trash.
 
-Two-way sync runs source to destination first, then returns changes in the other direction. Newer modification dates win; deletion is disabled, so a file removed from one side is restored from the other. Checksums can detect equal-size files whose dates also match.
+Two-way sync runs source to destination first, then returns changes in the other direction. After its first successful run, rsyncer saves a file fingerprint baseline. If both copies of a file later change, the selected conflict policy keeps both versions or chooses which location wins. Deletion is disabled, so a file removed from one side is restored from the other. Checksums can detect equal-size files whose dates also match.
 
 The scheduler runs one job at a time. The app prevents idle sleep during transfers, but cannot wake a sleeping or powered-off Mac. Drive-connection schedules only detect mount events while the app is running.
 
@@ -48,6 +50,7 @@ Settings and logs are stored in:
 
 ```text
 ~/Library/Application Support/rsyncer/state.json
+~/Library/Application Support/rsyncer/Manifests/
 ~/Library/Application Support/rsyncer/Logs/
 ```
 

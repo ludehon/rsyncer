@@ -71,7 +71,7 @@ struct ContentView: View {
         } message: {
             Text("Files in \(store.pairs.first(where: { $0.id == launchID })?.destination ?? "the destination") that do not exist in the source may be permanently deleted. Run a preview first to review the changes.")
         }
-        .alert("Source is unavailable", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
+        .alert("Rsyncer couldn’t continue", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
     }
@@ -100,7 +100,11 @@ struct ContentView: View {
             HStack {
                 Text("SAVED SYNCS").font(.system(size: 10, weight: .semibold)).tracking(1.6)
                 Spacer()
-                Menu { newSyncOptions } label: { Image(systemName: "plus").font(.system(size: 13)) }
+                Menu {
+                    newSyncOptions
+                    Divider()
+                    Button("Import sync…", systemImage: "square.and.arrow.down") { store.importPairs() }
+                } label: { Image(systemName: "plus").font(.system(size: 13)) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .accessibilityLabel("Add sync").help("New sync pair")
             }.foregroundStyle(.white.opacity(0.5)).padding(.horizontal, 24).padding(.bottom, 12)
@@ -150,6 +154,9 @@ struct ContentView: View {
                                 .disabled(store.activePairID == pair.id)
                             Button("Launch", systemImage: "play.fill") { requestLaunch(pair) }
                                 .disabled(store.isRunning || !pair.isConfigured)
+                            Button("Duplicate", systemImage: "plus.square.on.square") { store.duplicatePair(pair.id) }
+                                .disabled(store.activePairID == pair.id)
+                            Button("Export…", systemImage: "square.and.arrow.up") { store.exportPair(pair.id) }
                             Button(store.isPaused && store.activePairID == pair.id ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause current preview" : "Pause current sync"), systemImage: store.isPaused && store.activePairID == pair.id ? "play.fill" : "pause.fill", action: store.togglePause)
                                 .disabled(store.activePairID != pair.id || store.cancelling)
                             Divider()

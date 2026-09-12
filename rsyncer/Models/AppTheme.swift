@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 enum AppTheme: String, CaseIterable, Identifiable, Codable {
-    case lightPurple, lightBlue, yellow, red, deepBlue, deepGreen
+    /// `blue` keeps the old `deepBlue` raw value so themes already saved to UserDefaults still resolve.
+    case lightPurple, lightBlue, yellow, red, blue = "deepBlue", deepGreen
 
     static let storageKey = "theme"
     static var current: AppTheme {
@@ -18,7 +19,7 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
         case .lightBlue: return "Light blue"
         case .yellow: return "Yellow"
         case .red: return "Red"
-        case .deepBlue: return "Deep blue"
+        case .blue: return "Blue"
         case .deepGreen: return "Deep green"
         }
     }
@@ -27,10 +28,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
     var accent: Color {
         switch self {
         case .lightPurple: return Color(red: 0.45, green: 0.33, blue: 0.72)
-        case .lightBlue: return Color(red: 0.16, green: 0.46, blue: 0.72)
+        case .lightBlue: return Color(red: 0.05, green: 0.44, blue: 0.95)
         case .yellow: return Color(red: 0.60, green: 0.45, blue: 0.08)
         case .red: return Color(red: 0.70, green: 0.21, blue: 0.21)
-        case .deepBlue: return Color(red: 0.17, green: 0.27, blue: 0.56)
+        case .blue: return Color(red: 0.16, green: 0.46, blue: 0.72)
         case .deepGreen: return Color(red: 0.19, green: 0.43, blue: 0.34)
         }
     }
@@ -39,10 +40,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
     var accentBright: Color {
         switch self {
         case .lightPurple: return Color(red: 0.66, green: 0.52, blue: 0.96)
-        case .lightBlue: return Color(red: 0.33, green: 0.72, blue: 0.98)
+        case .lightBlue: return Color(red: 0.16, green: 0.74, blue: 1.00)
         case .yellow: return Color(red: 0.86, green: 0.63, blue: 0.10)
         case .red: return Color(red: 0.95, green: 0.42, blue: 0.38)
-        case .deepBlue: return Color(red: 0.44, green: 0.58, blue: 0.94)
+        case .blue: return Color(red: 0.33, green: 0.72, blue: 0.98)
         case .deepGreen: return Color(red: 0.29, green: 0.82, blue: 0.60)
         }
     }
@@ -51,10 +52,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
     var soft: Color {
         switch self {
         case .lightPurple: return Color(red: 0.78, green: 0.70, blue: 0.98)
-        case .lightBlue: return Color(red: 0.62, green: 0.84, blue: 0.99)
+        case .lightBlue: return Color(red: 0.56, green: 0.87, blue: 1.00)
         case .yellow: return Color(red: 0.97, green: 0.85, blue: 0.50)
         case .red: return Color(red: 0.98, green: 0.66, blue: 0.62)
-        case .deepBlue: return Color(red: 0.66, green: 0.76, blue: 0.99)
+        case .blue: return Color(red: 0.62, green: 0.84, blue: 0.99)
         case .deepGreen: return Color(red: 0.65, green: 0.85, blue: 0.62)
         }
     }
@@ -63,10 +64,10 @@ enum AppTheme: String, CaseIterable, Identifiable, Codable {
     var sidebar: Color {
         switch self {
         case .lightPurple: return Color(red: 0.16, green: 0.13, blue: 0.24)
-        case .lightBlue: return Color(red: 0.08, green: 0.15, blue: 0.23)
+        case .lightBlue: return Color(red: 0.05, green: 0.12, blue: 0.26)
         case .yellow: return Color(red: 0.18, green: 0.14, blue: 0.05)
         case .red: return Color(red: 0.20, green: 0.08, blue: 0.08)
-        case .deepBlue: return Color(red: 0.07, green: 0.10, blue: 0.21)
+        case .blue: return Color(red: 0.08, green: 0.15, blue: 0.23)
         case .deepGreen: return Color(red: 0.09, green: 0.15, blue: 0.14)
         }
     }

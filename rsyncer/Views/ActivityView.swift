@@ -76,20 +76,64 @@ struct ActivityView: View {
                 }.frame(maxWidth: .infinity).padding(.vertical, 28)
             }
             ForEach(records) { record in
-                HStack(spacing: 12) {
-                    Image(systemName: record.cancelled ? "stop.circle" : record.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.title).font(.system(size: 12, weight: .medium))
-                        Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
-                    Button { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) } label: { Image(systemName: "doc.text") }.help("Open run log")
-                }.padding(.vertical, 8)
+                RunHistoryRow(record: record)
                 Divider()
             }
         }
+    }
+}
+
+private struct RunHistoryRow: View {
+    let record: RunRecord
+    @State private var expanded = false
+    @State private var search = ""
+
+    private var details: [RunChange] {
+        guard let items = record.summary?.details else { return [] }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? items : items.filter { $0.path.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 12) {
+                Image(systemName: record.cancelled ? "stop.circle" : record.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(record.title).font(.system(size: 12, weight: .medium))
+                    Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    if let summary = record.summary, summary.total > 0 {
+                        Text(summary.label).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
+                if record.summary?.details.isEmpty == false {
+                    Button { withAnimation { expanded.toggle() } } label: {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }.help(expanded ? "Hide changed files" : "Show changed files")
+                }
+                Button { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) } label: { Image(systemName: "doc.text") }.help("Open run log")
+            }
+            if expanded {
+                TextField("Search changed files", text: $search)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                LazyVStack(alignment: .leading, spacing: 5) {
+                    ForEach(details.prefix(250)) { item in
+                        HStack(spacing: 8) {
+                            Text(item.kind.uppercased()).font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary).frame(width: 54, alignment: .leading)
+                            Text(item.path).font(.system(size: 10, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            if let size = item.size { Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)).font(.system(size: 9)).foregroundStyle(.secondary) }
+                        }
+                    }
+                    if details.count > 250 {
+                        Text("Showing 250 of \(details.count.formatted()) matches").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(10).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 8))
+            }
+        }.padding(.vertical, 8)
     }
 }

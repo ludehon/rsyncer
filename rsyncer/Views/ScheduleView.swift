@@ -40,8 +40,33 @@ struct ScheduleView: View {
                 .accessibilityLabel("Run this sync")
                 .menuStyle(.borderlessButton)
             }
-            if pair.schedule.kind == .daily || pair.schedule.kind == .weekly {
+            if pair.schedule.kind == .interval {
+                HStack {
+                    Text("Every")
+                    Stepper(value: $pair.schedule.intervalMinutes, in: 5...1440, step: 5) {
+                        Text("\(pair.schedule.intervalMinutes) minutes").monospacedDigit()
+                    }
+                }.frame(maxWidth: 360)
+            }
+            if pair.schedule.kind == .daily || pair.schedule.kind == .weekdays || pair.schedule.kind == .weekly {
                 DatePicker("At", selection: time, displayedComponents: .hourAndMinute).frame(maxWidth: 360)
+            }
+            if pair.schedule.kind == .weekdays {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("On").font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 6) {
+                        ForEach(1...7, id: \.self) { day in
+                            Button(String(Calendar.current.veryShortWeekdaySymbols[day - 1])) {
+                                var days = pair.schedule.weekdays
+                                if days.contains(day) && days.count > 1 { days.remove(day) } else { days.insert(day) }
+                                pair.schedule.weekdays = days
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(pair.schedule.weekdays.contains(day) ? Palette.accent : .secondary)
+                            .accessibilityLabel(Calendar.current.weekdaySymbols[day - 1])
+                        }
+                    }
+                }
             }
             if pair.schedule.kind == .weekly {
                 Picker("On", selection: $pair.schedule.weekday) {
@@ -55,6 +80,11 @@ struct ScheduleView: View {
             if pair.schedule.kind == .onMount {
                 Label("Runs when either saved location’s drive connects and both locations are available.", systemImage: "externaldrive.badge.plus")
                     .font(.system(size: 12)).foregroundStyle(Palette.accent)
+            }
+            if pair.schedule.kind != .manual {
+                Toggle("Run only while connected to external power", isOn: $pair.schedule.onlyOnExternalPower)
+                    .toggleStyle(.switch)
+                    .font(.system(size: 12))
             }
             if let status = store.scheduleStatus[pair.id] {
                 Label("Waiting: \(status)", systemImage: "clock.badge.exclamationmark").font(.system(size: 11)).foregroundStyle(.orange)

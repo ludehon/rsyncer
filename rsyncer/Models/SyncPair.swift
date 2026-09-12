@@ -23,16 +23,35 @@ struct SyncOptions: Codable, Equatable {
     var excludeHidden = false
     var excludePatterns = ".DS_Store\n.Trashes\n.Spotlight-V100\n.fseventsd"
     var bandwidthLimit = 0
+    var savedConflictPolicy: ConflictPolicy?
+    var conflictPolicy: ConflictPolicy {
+        get { savedConflictPolicy ?? .keepBoth }
+        set { savedConflictPolicy = newValue }
+    }
+}
+
+enum ConflictPolicy: String, Codable, CaseIterable, Identifiable {
+    case keepBoth, sourceWins, destinationWins
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .keepBoth: "Keep both versions"
+        case .sourceWins: "Source version wins"
+        case .destinationWins: "Destination version wins"
+        }
+    }
 }
 
 enum ScheduleKind: String, Codable, CaseIterable, Identifiable {
-    case manual, hourly, daily, weekly, onMount
+    case manual, interval, hourly, daily, weekdays, weekly, onMount
     var id: String { rawValue }
     var title: String {
         switch self {
         case .manual: "Manual only"
+        case .interval: "Every few minutes"
         case .hourly: "Every hour"
         case .daily: "Every day"
+        case .weekdays: "On selected days"
         case .weekly: "Every week"
         case .onMount: "When a drive connects"
         }
@@ -44,12 +63,32 @@ struct SyncSchedule: Codable, Equatable {
     var hour = 9
     var minute = 0
     var weekday = 2
+    var savedIntervalMinutes: Int?
+    var savedWeekdays: Set<Int>?
+    var savedOnlyOnExternalPower: Bool?
+    var intervalMinutes: Int {
+        get { savedIntervalMinutes ?? 30 }
+        set { savedIntervalMinutes = newValue }
+    }
+    var weekdays: Set<Int> {
+        get { savedWeekdays ?? [2, 3, 4, 5, 6] }
+        set { savedWeekdays = newValue }
+    }
+    var onlyOnExternalPower: Bool {
+        get { savedOnlyOnExternalPower ?? false }
+        set { savedOnlyOnExternalPower = newValue }
+    }
 
     func nextDate(after date: Date, calendar: Calendar = .current) -> Date? {
         switch kind {
         case .manual, .onMount: return nil
+        case .interval: return date.addingTimeInterval(TimeInterval(max(5, intervalMinutes) * 60))
         case .hourly: return date.addingTimeInterval(3600)
         case .daily: return calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute), matchingPolicy: .nextTime)
+        case .weekdays:
+            return weekdays.compactMap {
+                calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute, weekday: $0), matchingPolicy: .nextTime)
+            }.min()
         case .weekly: return calendar.nextDate(after: date, matching: DateComponents(hour: hour, minute: minute, weekday: weekday), matchingPolicy: .nextTime)
         }
     }
@@ -81,8 +120,29 @@ struct SyncPair: Identifiable, Codable, Equatable {
     var schedule = SyncSchedule()
     var nextRun: Date?
     var lastRun: Date?
+    var lastSuccessfulRun: Date?
     var lastResult: String?
     var isConfigured: Bool { !source.isEmpty && !destination.isEmpty }
+}
+
+struct RunChange: Codable, Equatable, Identifiable {
+    var id: String { "\(kind)|\(targetRoot)|\(path)" }
+    var kind: String
+    var path: String
+    var targetRoot: String
+    var size: Int64?
+}
+
+struct RunSummary: Codable, Equatable {
+    var added = 0
+    var updated = 0
+    var deleted = 0
+    var bytes: Int64 = 0
+    var details: [RunChange] = []
+    var total: Int { added + updated + deleted }
+    var label: String {
+        "\(added.formatted()) added · \(updated.formatted()) updated · \(deleted.formatted()) deleted · \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))"
+    }
 }
 
 struct RunRecord: Identifiable, Codable {
@@ -95,6 +155,7 @@ struct RunRecord: Identifiable, Codable {
     var exitCode: Int32
     var cancelled: Bool
     var logPath: String
+    var summary: RunSummary?
     var succeeded: Bool { exitCode == 0 && !cancelled }
     var title: String { cancelled ? "Cancelled" : succeeded ? (preview ? "Preview complete" : "Sync complete") : "Needs attention" }
     var durationLabel: String {

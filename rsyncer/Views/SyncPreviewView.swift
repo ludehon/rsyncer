@@ -8,16 +8,12 @@ struct SyncPreviewView: View {
     @State private var search = ""
     @State private var showingDetails = false
     @State private var targetFilter: String?
+    @State private var conflictsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let preview = store.syncPreview, preview.pair.id == pairID {
-                VStack(spacing: 10) {
-                    transferCard(preview, from: preview.pair.source, to: preview.pair.destination)
-                    if preview.pair.direction == .twoWay {
-                        transferCard(preview, from: preview.pair.destination, to: preview.pair.source)
-                    }
-                }.frame(maxWidth: 820)
+                transferCard(preview).frame(maxWidth: 820)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !preview.complete {
                     status("Comparing your locations…", detail: "The file plan will appear when the comparison finishes.", icon: "magnifyingglass")
@@ -30,6 +26,43 @@ struct SyncPreviewView: View {
                        current.source != preview.pair.source || current.destination != preview.pair.destination || current.options != preview.pair.options {
                         Label("Settings changed. Run Preview again to refresh this plan.", systemImage: "arrow.clockwise")
                             .font(.system(size: 11)).foregroundStyle(.orange)
+                    }
+                    if !preview.conflicts.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Label("\(preview.conflicts.count) two-way \(preview.conflicts.count == 1 ? "conflict" : "conflicts") detected", systemImage: "arrow.triangle.branch")
+                                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+                            Text("\(preview.pair.options.conflictPolicy.title) will be applied during sync. " + preview.conflicts.prefix(3).map(\.relativePath).joined(separator: " · "))
+                                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(3)
+                            Menu {
+                                ForEach(ConflictPolicy.allCases) { policy in
+                                    Button {
+                                        store.setConflictPolicy(policy, for: pairID)
+                                    } label: {
+                                        if preview.pair.options.conflictPolicy == policy {
+                                            Label(policy.title, systemImage: "checkmark")
+                                        } else { Text(policy.title) }
+                                    }
+                                }
+                            } label: {
+                                Label("Resolve: \(preview.pair.options.conflictPolicy.title)", systemImage: "slider.horizontal.3")
+                            }
+                            .menuStyle(.borderlessButton).fixedSize()
+                            DisclosureGroup("Review conflicting files", isExpanded: $conflictsExpanded) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    ForEach(preview.conflicts.prefix(250)) { conflict in
+                                        Text(conflict.relativePath).font(.system(size: 10, design: .monospaced))
+                                            .lineLimit(1).truncationMode(.middle)
+                                    }
+                                    if preview.conflicts.count > 250 {
+                                        Text("Showing 250 of \(preview.conflicts.count.formatted()) conflicts")
+                                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                                    }
+                                }.padding(.top, 7)
+                            }
+                            .font(.system(size: 10, weight: .medium))
+                        }
+                        .padding(12).frame(maxWidth: 820, alignment: .leading)
+                        .cardSurface(radius: 10, fill: Color.orange.opacity(0.08), stroke: Color.orange.opacity(0.25))
                     }
                     HStack(spacing: 10) {
                         ForEach(PreviewChange.Kind.allCases, id: \.self) { kind in
@@ -64,7 +97,7 @@ struct SyncPreviewView: View {
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 if preview.pair.direction == .twoWay {
-                    Text("Both directions are compared independently. Each group shows the location that would receive the changes; newer files win during sync.")
+                    Text("Both directions are compared independently. Each group shows the location that would receive changes. Conflicts use the policy selected in Sync options.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 if preview.pair.options.extendedAttributes {
@@ -189,50 +222,77 @@ struct SyncPreviewView: View {
         }.padding(24).frame(width: 720, height: 540)
     }
 
-    private func transferCard(_ preview: SyncPreview, from source: String, to destination: String) -> some View {
-        let target = RsyncCommand.url(for: destination).path
-        let changes = preview.changes.filter { $0.targetRoot == target && $0.kind != .deleted }
-        let metrics = PreviewMetrics(changes)
+    private func transferCard(_ preview: SyncPreview) -> some View {
+        // One card for the pair: each location appears once, on its own side, with an arrow per direction.
+        let twoWay = preview.pair.direction == .twoWay
         return HStack(spacing: 18) {
-            endpoint(source, title: "FROM", destination: false)
-            VStack(spacing: 7) {
-                Text(preview.complete ? metrics.sizeLabel : "Comparing…")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Palette.accentBright)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 0) {
-                    Circle().fill(Palette.accentBright.opacity(0.5)).frame(width: 6, height: 6)
-                    Capsule().fill(LinearGradient(colors: [Palette.accentBright.opacity(0.45), Palette.accentBright],
-                                                  startPoint: .leading, endPoint: .trailing))
-                        .frame(height: 3)
-                    Image(systemName: "arrowtriangle.right.fill")
-                        .font(.system(size: 13)).foregroundStyle(Palette.accentBright).offset(x: -1)
-                }.frame(maxWidth: .infinity).frame(height: 16)
-                    .shadow(color: Palette.accentBright.opacity(0.45), radius: 5)
-                    .accessibilityLabel("To")
+            endpoint(preview.pair.source, title: twoWay ? "SOURCE" : "FROM",
+                     volume: false, sending: true, receiving: twoWay)
+            VStack(spacing: 10) {
+                flow(preview, reversed: false)
+                if twoWay { flow(preview, reversed: true) }
                 Text(preview.complete ? (preview.succeeded ? "Planned file contents" : "Partial file contents") : "Calculating size")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-            }.frame(width: 125, alignment: .center)
-                .help("Size of added and updated files in this direction. Excludes deletions, folders and links; actual transferred bytes may differ.")
-            endpoint(destination, title: "TO", destination: true)
+            }.frame(width: 135, alignment: .center)
+                .help("Size of added and updated files in each direction. Excludes deletions, folders and links; actual transferred bytes may differ.")
+            endpoint(preview.pair.destination, title: twoWay ? "DESTINATION" : "TO",
+                     volume: true, sending: twoWay, receiving: true)
         }
         .padding(18)
         .cardSurface(radius: 15)
     }
 
-    private func endpoint(_ path: String, title: String, destination: Bool) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: destination ? "externaldrive.fill" : "folder.fill")
+    private func flow(_ preview: SyncPreview, reversed: Bool) -> some View {
+        let destination = reversed ? preview.pair.source : preview.pair.destination
+        let target = RsyncCommand.url(for: destination).path
+        let changes = preview.changes.filter { $0.targetRoot == target && $0.kind != .deleted }
+        let metrics = PreviewMetrics(changes)
+        let sourceName = URL(fileURLWithPath: reversed ? preview.pair.destination : preview.pair.source).lastPathComponent
+        let destinationName = URL(fileURLWithPath: destination).lastPathComponent
+        return VStack(spacing: 5) {
+            Text(preview.complete ? metrics.sizeLabel : "Comparing…")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Palette.accentBright)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 0) {
+                if reversed {
+                    Image(systemName: "arrowtriangle.left.fill")
+                        .font(.system(size: 13)).foregroundStyle(Palette.accentBright).offset(x: 1)
+                } else {
+                    Circle().fill(Palette.accentBright.opacity(0.5)).frame(width: 6, height: 6)
+                }
+                Capsule().fill(LinearGradient(colors: [Palette.accentBright.opacity(0.45), Palette.accentBright],
+                                              startPoint: reversed ? .trailing : .leading,
+                                              endPoint: reversed ? .leading : .trailing))
+                    .frame(height: 3)
+                if reversed {
+                    Circle().fill(Palette.accentBright.opacity(0.5)).frame(width: 6, height: 6)
+                } else {
+                    Image(systemName: "arrowtriangle.right.fill")
+                        .font(.system(size: 13)).foregroundStyle(Palette.accentBright).offset(x: -1)
+                }
+            }.frame(maxWidth: .infinity).frame(height: 16)
+                .shadow(color: Palette.accentBright.opacity(0.45), radius: 5)
+                .accessibilityLabel("From \(sourceName) to \(destinationName)")
+        }
+    }
+
+    private func endpoint(_ path: String, title: String, volume: Bool, sending: Bool, receiving: Bool) -> some View {
+        let tint = volume ? Palette.accent : Color.blue
+        let badge = sending && receiving ? "arrow.up.arrow.down.circle.fill"
+            : sending ? "arrow.up.circle.fill" : "arrow.down.circle.fill"
+        return HStack(alignment: .top, spacing: 11) {
+            Image(systemName: volume ? "externaldrive.fill" : "folder.fill")
                 .font(.system(size: 26, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(destination ? Palette.accent : Color.blue)
+                .foregroundStyle(tint)
                 .frame(width: 46, height: 46)
-                .background((destination ? Palette.accent : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: destination ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                    Image(systemName: badge)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(destination ? Palette.accent : Color.blue)
+                        .foregroundStyle(tint)
                         .background(.background, in: Circle()).offset(x: 3, y: 3)
                 }
             VStack(alignment: .leading, spacing: 5) {
@@ -242,7 +302,7 @@ struct SyncPreviewView: View {
                 Text(path).font(.system(size: 10)).foregroundStyle(.secondary).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }.frame(maxWidth: .infinity, alignment: destination ? .trailing : .leading)
+        }.frame(maxWidth: .infinity, alignment: volume ? .trailing : .leading)
     }
 
     private func status(_ title: String, detail: String, icon: String) -> some View {

@@ -214,7 +214,7 @@ struct LocationCard: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
                     .help(path.isEmpty ? "Choose a location" : "Open in Finder")
-                    if source && !path.isEmpty && hovering {
+                    if !path.isEmpty && hovering {
                         Button { path = "" } label: {
                             Image(systemName: "xmark")
                                 .font(.system(size: 7, weight: .bold))
@@ -224,8 +224,8 @@ struct LocationCard: View {
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Clear source")
-                        .help("Clear source")
+                        .accessibilityLabel(source ? "Clear source" : "Clear destination")
+                        .help(source ? "Clear source" : "Clear destination")
                         .offset(x: -5, y: -3)
                         .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     }

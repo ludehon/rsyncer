@@ -17,6 +17,7 @@ struct PreviewChange: Identifiable {
 struct SyncPreview {
     let pair: SyncPair
     var changes: [PreviewChange] = []
+    var conflicts: [SyncConflict] = []
     var complete = false
     var succeeded = false
 
