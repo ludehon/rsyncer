@@ -44,6 +44,12 @@ struct IntegrationTests {
             return (result.0, result.1, output)
         }
 
+        try expect(AppVersion.normalized("v1.1") == "1.1", "Release tags normalize their leading v")
+        try expect(AppVersion.isNewer("v1.1", than: "1.0"), "A newer GitHub release is detected")
+        try expect(AppVersion.isNewer("1.10", than: "1.9"), "Version components compare numerically")
+        try expect(!AppVersion.isNewer("v1.1.0", than: "1.1"), "Equivalent version component lengths compare equally")
+        try expect(!AppVersion.isNewer("not-a-version", than: "1.0"), "Malformed release tags are ignored")
+
         let durationStart = Date(timeIntervalSinceReferenceDate: 0)
         try expect(!SyncOptions().extendedAttributes, "New syncs default to no Mac metadata")
         for enabled in [false, true] {

@@ -61,11 +61,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct rsyncerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var store = AppStore()
+    @StateObject private var updateChecker = UpdateChecker()
 
     var body: some Scene {
         Window("Rsyncer", id: "main") {
             ContentView().environmentObject(store)
                 .onAppear { delegate.store = store; store.tick() }
+                .task {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled else { return }
+                    await updateChecker.checkForUpdatesIfNeeded()
+                }
                 .background(MainWindowRegistration(register: delegate.registerMainWindow))
         }
         .defaultSize(width: 1120, height: 840)
