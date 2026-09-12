@@ -15,13 +15,20 @@ struct PairDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             // The header stays put; only the selected tab’s contents scroll.
-            VStack(alignment: .leading, spacing: 25) {
+            VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("SYNC WORKSPACE")
+                            .font(.system(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(.secondary)
+                        Text(pair.name.isEmpty ? "Untitled sync" : pair.name)
+                            .font(.system(size: 26, weight: .semibold)).tracking(-0.7).lineLimit(1)
+                    }
+                    Spacer(minLength: 12)
                     Label(locked ? (store.isPaused ? "Paused" : store.isPreview ? "Previewing" : "Syncing") : pair.direction.title, systemImage: locked ? (store.isPaused ? "pause.circle" : store.isPreview ? "eye" : "arrow.triangle.2.circlepath") : pair.direction.symbol)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Palette.accent)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.accentInk)
                         .padding(.horizontal, 13).padding(.vertical, 8)
-                        .background(Palette.accent.opacity(0.14), in: Capsule())
+                        .background(Palette.accent.opacity(0.08), in: Capsule())
                         .contentShape(Capsule())
                         .onHover { hoveringMode = $0 }
                         .popover(isPresented: $hoveringMode, arrowEdge: .bottom) {
@@ -32,15 +39,19 @@ struct PairDetailView: View {
                                 .frame(maxWidth: 260, alignment: .leading)
                                 .padding(12)
                         }
-                    Spacer()
                 }
-                HStack(spacing: 14) {
+                HStack(spacing: 12) {
                     LocationCard(title: "SOURCE", subtitle: "The files you want to bring along", path: binding.source, source: true, pairID: pairID)
+                    Image(systemName: pair.direction.symbol)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Palette.accentInk)
+                        .frame(width: 30, height: 30)
+                        .background(Palette.accent.opacity(0.08), in: Circle())
+                        .accessibilityLabel(pair.direction.title)
                     LocationCard(title: "DESTINATION", subtitle: "The place they’ll call home", path: binding.destination, source: false, pairID: pairID)
                 }.disabled(locked)
                 HStack(spacing: 16) {
                     DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
-                    Spacer(minLength: 0)
                     if !store.changesSaved {
                         Text("NOT SAVED")
                             .font(.system(size: 9, weight: .medium)).tracking(1.2)
@@ -49,10 +60,7 @@ struct PairDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Keep the scroll viewport clear of the segmented control. AppKit draws
-            // the control a little outside its SwiftUI layout bounds, so placing a
-            // clipping ScrollView directly against it trims the bottom edge.
-            .padding(.horizontal, 32).padding(.top, 12).padding(.bottom, 10)
+            .padding(.horizontal, 28).padding(.top, 20).padding(.bottom, 0)
             ScrollView {
                 Group {
                     switch tab {
@@ -63,9 +71,7 @@ struct PairDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // Together with the fixed header inset this preserves the original
-                // 22-point gap before the first item without clipping the tab bar.
-                .padding(.horizontal, 32).padding(.top, 12).padding(.bottom, 32)
+                .padding(.horizontal, 28).padding(.top, 22).padding(.bottom, 28)
             }
             .scrollBounceBehavior(.basedOnSize)
             footer
@@ -94,13 +100,15 @@ struct PairDetailView: View {
                 }
             }
             HStack {
+                Label(locked ? "Run in progress" : "Preview changes before you sync", systemImage: locked ? "waveform.path" : "eye")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 if locked {
                     Button(action: store.togglePause) {
                         Label(store.isPaused ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause preview" : "Pause sync"), systemImage: store.isPaused ? "play.fill" : "pause.fill")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Palette.accentBright)
-                            .padding(.horizontal, 18).frame(height: 30)
+                            .foregroundStyle(Palette.accentInk)
+                            .padding(.horizontal, 18).frame(height: 36)
                             .background(Palette.accentBright.opacity(0.12), in: Capsule())
                             .overlay { Capsule().strokeBorder(Palette.accentBright.opacity(0.85), lineWidth: 1) }
                             .contentShape(Capsule())
@@ -112,7 +120,7 @@ struct PairDetailView: View {
                         Label(store.cancelling ? "Stopping…" : (store.isPreview ? "Stop preview" : "Stop sync"), systemImage: "stop.fill")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 18).frame(height: 30)
+                            .padding(.horizontal, 18).frame(height: 36)
                             .background(Color.red, in: Capsule())
                             .contentShape(Capsule())
                     }
@@ -123,11 +131,11 @@ struct PairDetailView: View {
                     Button { store.start(pair, preview: true); tab = .preview } label: {
                         Label("Preview", systemImage: "eye")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Palette.accentBright)
-                            .padding(.horizontal, 18).frame(height: 30)
+                            .foregroundStyle(Palette.accentInk)
+                            .padding(.horizontal, 18).frame(height: 36)
                             .background(Palette.accentBright.opacity(0.12), in: Capsule())
                             .overlay {
-                                Capsule().strokeBorder(Palette.accentBright.opacity(0.85), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                                Capsule().strokeBorder(Palette.accent.opacity(0.2), lineWidth: 1)
                             }
                             .contentShape(Capsule())
                     }
@@ -141,7 +149,7 @@ struct PairDetailView: View {
                         Label("Sync now", systemImage: pair.direction.symbol)
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 24).frame(height: 30)
+                            .padding(.horizontal, 24).frame(height: 36)
                             .background(Palette.accent, in: Capsule())
                             .contentShape(Capsule())
                     }
@@ -150,7 +158,7 @@ struct PairDetailView: View {
                         .disabled(!pair.isConfigured || store.isRunning)
                 }
             }
-        }.padding(.horizontal, 32).padding(.vertical, 20).background(.background).overlay(alignment: .top) { Divider() }
+        }.padding(.horizontal, 32).padding(.vertical, 16).background(Palette.cardFill).overlay(alignment: .top) { Divider() }
     }
 }
 
@@ -159,18 +167,35 @@ struct DetailTabSelector: View {
     let activityCount: Int
 
     var body: some View {
-        Picker("Sync sections", selection: $selection) {
+        HStack(spacing: 24) {
             ForEach(PairDetailView.DetailTab.allCases, id: \.self) { item in
-                Text(item == .activity && activityCount > 0
-                     ? "Activity (\(activityCount))"
-                     : item.rawValue)
-                    .tag(item)
+                Button { selection = item } label: {
+                    HStack(spacing: 6) {
+                        Text(item.rawValue).font(.system(size: 12, weight: selection == item ? .semibold : .medium))
+                        if item == .activity && activityCount > 0 {
+                            Text(activityCount.formatted())
+                                .font(.system(size: 9, weight: .semibold)).monospacedDigit()
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Palette.insetFill, in: Capsule())
+                        }
+                    }
+                    .foregroundStyle(selection == item ? Palette.accentInk : .secondary)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .bottom) {
+                        if selection == item {
+                            UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
+                                .fill(Palette.accent).frame(height: 3)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == item ? [.isSelected] : [])
             }
+            Spacer(minLength: 0)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.large)
-        .frame(maxWidth: 540, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.cardStroke).frame(height: 1) }
     }
 }
 
@@ -186,13 +211,13 @@ struct LocationCard: View {
     @FocusState private var pathIsFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 13) {
             HStack {
                 Text(title).font(.system(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 Spacer()
                 Image(systemName: source ? "arrow.up.right" : "arrow.down.right").font(.system(size: 12)).foregroundStyle(.tertiary)
             }
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
                 ZStack(alignment: .topLeading) {
                     Button {
                         if path.isEmpty {
@@ -207,9 +232,10 @@ struct LocationCard: View {
                         }
                     } label: {
                         Image(systemName: source ? "folder.fill" : "externaldrive.fill")
-                            .font(.system(size: 36, weight: .light)).symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(source ? Palette.accent : Color(red: 0.65, green: 0.48, blue: 0.26))
-                            .frame(height: 42)
+                            .font(.system(size: 25, weight: .regular)).symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Palette.accentInk)
+                            .frame(width: 48, height: 48)
+                            .background(Palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
@@ -248,10 +274,13 @@ struct LocationCard: View {
                     .focused($pathIsFocused)
                     .accessibilityLabel(source ? "Source path" : "Destination path")
             }.padding(9).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 5))
-            if !path.isEmpty { LocationStorageView(monitor: store.volumes, path: path) }
+            if !path.isEmpty {
+                LocationStorageView(monitor: store.volumes, path: path)
+                    .frame(height: 32, alignment: .bottomLeading)
+            }
         }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(radius: 13, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(radius: 16, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
                      stroke: targeted ? Palette.accent : Palette.cardStroke, dash: path.isEmpty ? [5, 4] : [])
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)

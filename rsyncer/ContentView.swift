@@ -23,7 +23,7 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 238)
+            sidebar.frame(width: 224)
             Group {
                 if showVolumes {
                     VolumesView(monitor: store.volumes)
@@ -94,11 +94,15 @@ struct ContentView: View {
                     .fill(Palette.soft, style: FillStyle(eoFill: true))
                     .frame(width: 32, height: 32)
                     .accessibilityHidden(true)
-                Text("Rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
+                Text("Rsyncer").font(.system(size: 22, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
-            Spacer().frame(height: 38)
+            Spacer().frame(height: 32)
             HStack {
                 Text("SAVED SYNCS").font(.system(size: 10, weight: .semibold)).tracking(1.6)
+                Text(store.pairs.count.formatted())
+                    .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.white.opacity(0.08), in: Capsule())
                 Spacer()
                 Menu {
                     newSyncOptions
@@ -148,7 +152,12 @@ struct ContentView: View {
                             .accessibilityLabel("Launch \(pair.name.isEmpty ? "Untitled sync" : pair.name)")
                             .padding(.trailing, 8)
                         }
-                        .background(store.selectedID == pair.id && !showVolumes ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                        .background(store.selectedID == pair.id && !showVolumes ? .white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 11))
+                        .overlay(alignment: .leading) {
+                            if store.selectedID == pair.id && !showVolumes {
+                                Capsule().fill(Palette.soft).frame(width: 3, height: 22)
+                            }
+                        }
                         .contextMenu {
                             Button("Rename…", systemImage: "pencil") { renameText = pair.name; renameID = pair.id }
                                 .disabled(store.activePairID == pair.id)
@@ -205,7 +214,7 @@ struct ContentView: View {
             }.buttonStyle(.plain).padding(.horizontal, 24).padding(.bottom, 24)
         }
         .foregroundStyle(.white)
-        .background(Palette.sidebar)
+        .background(LinearGradient(colors: [Palette.sidebar, Palette.sidebar.opacity(0.94)], startPoint: .topLeading, endPoint: .bottomTrailing))
     }
 
     private func syncStatus(for pair: SyncPair) -> String {

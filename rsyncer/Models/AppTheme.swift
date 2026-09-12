@@ -77,18 +77,20 @@ enum Palette {
     static var theme: AppTheme { AppTheme.current }
     static var accent: Color { theme.accent }
     static var accentBright: Color { theme.accentBright }
+    /// Readable theme color for small labels and symbols in either appearance.
+    static var accentInk: Color { dynamic(light: NSColor(theme.accent), dark: NSColor(theme.soft)) }
     static var soft: Color { theme.soft }
     static var sidebar: Color { theme.sidebar }
 
     /// Page backdrop. Light mode is a soft grey so white cards read as raised surfaces against it;
     /// the system window color is nearly white and leaves cards invisible.
-    static let canvas = dynamic(light: NSColor(white: 0.929, alpha: 1), dark: .windowBackgroundColor)
+    static let canvas = dynamic(light: NSColor(red: 0.965, green: 0.965, blue: 0.975, alpha: 1), dark: .windowBackgroundColor)
     /// Card face. Light mode is plain white against the grey canvas; dark mode lifts off the backdrop.
     static let cardFill = dynamic(light: .white, dark: NSColor(white: 1, alpha: 0.055))
     /// Card outline. Firm enough in light mode to hold an edge where the shadow is subtle.
-    static let cardStroke = dynamic(light: NSColor(white: 0, alpha: 0.13), dark: NSColor(white: 1, alpha: 0.11))
+    static let cardStroke = dynamic(light: NSColor(white: 0, alpha: 0.07), dark: NSColor(white: 1, alpha: 0.11))
     /// Drop shadow under cards. Dark mode relies on the lighter fill instead.
-    static let cardShadow = dynamic(light: NSColor(white: 0, alpha: 0.10), dark: .clear)
+    static let cardShadow = dynamic(light: NSColor(white: 0, alpha: 0.025), dark: .clear)
     /// Panels recessed into a card, such as path fields and option groups.
     static let insetFill = dynamic(light: NSColor(white: 0, alpha: 0.045), dark: NSColor(white: 1, alpha: 0.05))
 
@@ -110,7 +112,7 @@ struct CardSurface: ViewModifier {
         content
             .background(fill, in: RoundedRectangle(cornerRadius: radius))
             .overlay { RoundedRectangle(cornerRadius: radius).strokeBorder(stroke, style: StrokeStyle(lineWidth: 1, dash: dash)) }
-            .shadow(color: Palette.cardShadow, radius: 3, y: 1)
+            .shadow(color: Palette.cardShadow, radius: 12, y: 4)
     }
 }
 

@@ -22,7 +22,10 @@ struct ActivityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Run history").font(.system(size: 16, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Run history").font(.system(size: 16, weight: .semibold))
+                    Text("Every transfer, in one place.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Open logs", action: store.revealLogs).font(.system(size: 11))
             }
@@ -75,9 +78,14 @@ struct ActivityView: View {
                     Text("Run a preview or sync to see its activity here.").font(.system(size: 11)).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity).padding(.vertical, 28)
             }
-            ForEach(records) { record in
-                RunHistoryRow(record: record)
-                Divider()
+            if !records.isEmpty {
+                LazyVStack(spacing: 0) {
+                    ForEach(records) { record in
+                        RunHistoryRow(record: record)
+                        if record.id != records.last?.id { Divider().padding(.leading, 60) }
+                    }
+                }
+                .cardSurface(radius: 14)
             }
         }
     }
@@ -98,7 +106,9 @@ private struct RunHistoryRow: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 12) {
                 Image(systemName: record.cancelled ? "stop.circle" : record.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
+                    .foregroundStyle(record.succeeded ? Palette.accentInk : .orange).font(.system(size: 16))
+                    .frame(width: 32, height: 32)
+                    .background((record.succeeded ? Palette.accent : .orange).opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(record.title).font(.system(size: 12, weight: .medium))
                     Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
@@ -108,7 +118,10 @@ private struct RunHistoryRow: View {
                     }
                 }
                 Spacer()
-                if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
+                Text(record.preview ? "Preview" : "Sync")
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Palette.insetFill, in: Capsule())
                 if record.summary?.details.isEmpty == false {
                     Button { withAnimation { expanded.toggle() } } label: {
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -134,6 +147,6 @@ private struct RunHistoryRow: View {
                 }
                 .padding(10).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 8))
             }
-        }.padding(.vertical, 8)
+        }.padding(.horizontal, 16).padding(.vertical, 13)
     }
 }
