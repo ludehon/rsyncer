@@ -2,7 +2,7 @@
 
 A native macOS app for syncing files and folders between local drives and mounted volumes. Requires macOS 14 or later.
 
-![Preview of a one-way sync plan](docs/preview-plan.jpg)
+![Preview of a one-way sync plan](docs/screen.jpg)
 
 ## Features
 
