@@ -22,7 +22,7 @@ struct ActivityView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Every run, accounted for").font(.system(size: 16, weight: .semibold))
+                Text("Run history").font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button("Open logs", action: store.revealLogs).font(.system(size: 11))
             }

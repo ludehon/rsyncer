@@ -26,8 +26,8 @@ struct PairDetailView: View {
                         .onHover { hoveringMode = $0 }
                         .popover(isPresented: $hoveringMode, arrowEdge: .bottom) {
                             Text(pair.direction == .oneWay
-                                 ? "Folder contents are copied into the destination. Your source stays intact."
-                                 : "Copies both ways; newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
+                                 ? "Folder contents are copied into the destination"
+                                 : "Copies both ways, newer files win. Deletions are not shared. Equal-date differences favor the source; use checksums to detect equal-size differences. Preview compares each direction independently.")
                                 .font(.system(size: 11))
                                 .frame(maxWidth: 260, alignment: .leading)
                                 .padding(12)
@@ -182,6 +182,8 @@ struct LocationCard: View {
     var source: Bool
     var pairID: UUID
     @State private var targeted = false
+    @State private var hovering = false
+    @FocusState private var pathIsFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -191,25 +193,43 @@ struct LocationCard: View {
                 Image(systemName: source ? "arrow.up.right" : "arrow.down.right").font(.system(size: 12)).foregroundStyle(.tertiary)
             }
             VStack(alignment: .leading, spacing: 12) {
-                Button {
-                    if path.isEmpty {
-                        store.chooseLocation(source: source, pairID: pairID)
-                    } else {
-                        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-                        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == false {
-                            NSWorkspace.shared.activateFileViewerSelecting([url])
-                        } else if !NSWorkspace.shared.open(url) {
-                            store.errorMessage = "Could not open \(path) in Finder."
+                ZStack(alignment: .topLeading) {
+                    Button {
+                        if path.isEmpty {
+                            store.chooseLocation(source: source, pairID: pairID)
+                        } else {
+                            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+                            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == false {
+                                NSWorkspace.shared.activateFileViewerSelecting([url])
+                            } else if !NSWorkspace.shared.open(url) {
+                                store.errorMessage = "Could not open \(path) in Finder."
+                            }
                         }
+                    } label: {
+                        Image(systemName: source ? "folder.fill" : "externaldrive.fill")
+                            .font(.system(size: 36, weight: .light)).symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(source ? Palette.accent : Color(red: 0.65, green: 0.48, blue: 0.26))
+                            .frame(height: 42)
                     }
-                } label: {
-                    Image(systemName: source ? "folder.fill" : "externaldrive.fill")
-                        .font(.system(size: 36, weight: .light)).symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(source ? Palette.accent : Color(red: 0.65, green: 0.48, blue: 0.26))
-                        .frame(height: 42)
-                }.buttonStyle(.plain)
+                    .buttonStyle(.plain)
                     .accessibilityLabel(path.isEmpty ? "Choose \(source ? "source" : "destination")" : "Open \(source ? "source" : "destination") in Finder")
                     .help(path.isEmpty ? "Choose a location" : "Open in Finder")
+                    if source && !path.isEmpty && hovering {
+                        Button { path = "" } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .background(Color.black.opacity(0.78), in: Circle())
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear source")
+                        .help("Clear source")
+                        .offset(x: -5, y: -3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    }
+                }
                 Button { store.chooseLocation(source: source, pairID: pairID) } label: {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(path.isEmpty ? (source ? "Drop a file or folder" : "Drop a folder here") : URL(fileURLWithPath: path).lastPathComponent)
@@ -225,6 +245,7 @@ struct LocationCard: View {
                 Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(.tertiary)
                 TextField("Or type an absolute path…", text: $path).textFieldStyle(.plain)
                     .font(.system(size: 10, design: .monospaced)).lineLimit(1)
+                    .focused($pathIsFocused)
                     .accessibilityLabel(source ? "Source path" : "Destination path")
             }.padding(9).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 5))
             if !path.isEmpty { LocationStorageView(monitor: store.volumes, path: path) }
@@ -232,6 +253,11 @@ struct LocationCard: View {
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface(radius: 13, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
                      stroke: targeted ? Palette.accent : Palette.cardStroke, dash: path.isEmpty ? [5, 4] : [])
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .onAppear {
+            DispatchQueue.main.async { pathIsFocused = false }
+        }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first, urls.count == 1, url.isFileURL else { return false }
             if !source {

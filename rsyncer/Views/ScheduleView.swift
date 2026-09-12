@@ -14,7 +14,7 @@ struct ScheduleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Give your sync a rhythm").font(.system(size: 16, weight: .semibold))
+                Text("Schedule your sync").font(.system(size: 16, weight: .semibold))
                 Text("Automatic runs use this pair’s saved options.").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             HStack(alignment: .firstTextBaseline, spacing: 16) {

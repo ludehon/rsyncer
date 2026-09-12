@@ -71,7 +71,7 @@ struct ContentView: View {
         } message: {
             Text("Files in \(store.pairs.first(where: { $0.id == launchID })?.destination ?? "the destination") that do not exist in the source may be permanently deleted. Run a preview first to review the changes.")
         }
-        .alert("rsyncer needs your attention", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
+        .alert("Source is unavailable", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
     }
