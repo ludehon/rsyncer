@@ -47,7 +47,8 @@ struct PairDetailView: View {
                         path: binding.source,
                         source: true,
                         locationName: pair.direction == .twoWay ? "Source 1" : "Source",
-                        pairID: pairID
+                        pairID: pairID,
+                        locked: locked
                     )
                     Image(systemName: pair.direction.symbol)
                         .font(.system(size: 15, weight: .medium))
@@ -61,9 +62,10 @@ struct PairDetailView: View {
                         path: binding.destination,
                         source: false,
                         locationName: pair.direction == .twoWay ? "Source 2" : "Destination",
-                        pairID: pairID
+                        pairID: pairID,
+                        locked: locked
                     )
-                }.disabled(locked)
+                }
                 HStack(spacing: 16) {
                     DetailTabSelector(selection: $tab, activityCount: store.history.filter { $0.pairID == pairID }.count)
                     if !store.changesSaved {
@@ -221,88 +223,102 @@ struct LocationCard: View {
     var source: Bool
     var locationName: String
     var pairID: UUID
+    var locked: Bool
     @State private var targeted = false
-    @State private var hovering = false
     @FocusState private var pathIsFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(title).font(.system(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 Spacer()
-                Image(systemName: source ? "arrow.up.right" : "arrow.down.right").font(.system(size: 12)).foregroundStyle(.tertiary)
-            }
-            HStack(spacing: 12) {
-                ZStack(alignment: .topLeading) {
-                    Button {
-                        if path.isEmpty {
-                            store.chooseLocation(source: source, pairID: pairID)
-                        } else {
-                            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-                            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == false {
-                                NSWorkspace.shared.activateFileViewerSelecting([url])
-                            } else if !NSWorkspace.shared.open(url) {
-                                store.errorMessage = "Could not open \(path) in Finder."
-                            }
-                        }
-                    } label: {
-                        Image(systemName: source ? "folder.fill" : "externaldrive.fill")
-                            .font(.system(size: 25, weight: .regular)).symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(Palette.accentInk)
-                            .frame(width: 48, height: 48)
-                            .background(Palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(path.isEmpty ? "Choose \(locationName)" : "Open \(locationName) in Finder")
-                    .help(path.isEmpty ? "Choose a location" : "Open in Finder")
-                    if !path.isEmpty && hovering {
-                        Button { path = "" } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 7, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 16, height: 16)
-                                .background(Color.black.opacity(0.78), in: Circle())
-                                .contentShape(Circle())
+                if !path.isEmpty {
+                    HStack(spacing: 6) {
+                        Button(action: openInFinder) {
+                            Label("Open", systemImage: "arrow.up.forward.square")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Palette.accentInk)
+                                .padding(.horizontal, 10)
+                                .frame(height: 28)
+                                .background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(Palette.cardStroke)
+                                }
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Clear \(locationName)")
-                        .help("Clear \(locationName)")
-                        .offset(x: -5, y: -3)
-                        .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                        .accessibilityLabel("Open \(locationName) in Finder")
+                        .help("Open in Finder")
+                        Button { path = "" } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 8))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(Palette.cardStroke)
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(locked)
+                        .accessibilityLabel("Remove \(locationName)")
+                        .help("Remove \(locationName)")
                     }
                 }
-                Button { store.chooseLocation(source: source, pairID: pairID) } label: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(path.isEmpty ? (source ? "Drop a file or folder" : "Drop a folder here") : URL(fileURLWithPath: path).lastPathComponent)
-                            .font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                        if path.isEmpty {
-                            Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                    .help("Choose a location")
             }
-            HStack(spacing: 5) {
-                Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(.tertiary)
-                TextField("Or type an absolute path…", text: $path).textFieldStyle(.plain)
-                    .font(.system(size: 10, design: .monospaced)).lineLimit(1)
-                    .focused($pathIsFocused)
-                    .accessibilityLabel("\(locationName) path")
-            }.padding(9).background(Palette.insetFill, in: RoundedRectangle(cornerRadius: 5))
+            HStack(spacing: 12) {
+                Button { store.chooseLocation(source: source, pairID: pairID) } label: {
+                    Image(systemName: source ? "folder.fill" : "externaldrive.fill")
+                        .font(.system(size: 23, weight: .regular)).symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Palette.accentInk)
+                        .frame(width: 44, height: 44)
+                        .background(Palette.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(locked)
+                .accessibilityLabel(path.isEmpty ? "Choose \(locationName)" : "Choose a different \(locationName)")
+                .help(path.isEmpty ? "Choose a location" : "Choose a different location")
+                VStack(alignment: .leading, spacing: 4) {
+                    Button { store.chooseLocation(source: source, pairID: pairID) } label: {
+                        Text(path.isEmpty ? (source ? "Drop a file or folder" : "Drop a folder here") : URL(fileURLWithPath: path).lastPathComponent)
+                            .font(.system(size: 15, weight: .semibold)).lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(locked)
+                    .help("Choose a location")
+                    if path.isEmpty {
+                        Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        TextField("Absolute path", text: $path)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .focused($pathIsFocused)
+                            .disabled(locked)
+                            .accessibilityLabel("\(locationName) path")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if !path.isEmpty {
                 LocationStorageView(monitor: store.volumes, path: path)
-                    .frame(height: 32, alignment: .bottomLeading)
             }
         }
-        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface(radius: 16, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
+        .padding(13).frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(radius: 14, fill: targeted ? Palette.accent.opacity(0.08) : Palette.cardFill,
                      stroke: targeted ? Palette.accent : Palette.cardStroke, dash: path.isEmpty ? [5, 4] : [])
-        .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: hovering)
         .onAppear {
             DispatchQueue.main.async { pathIsFocused = false }
         }
         .dropDestination(for: URL.self) { urls, _ in
+            guard !locked else { return false }
             guard let url = urls.first, urls.count == 1, url.isFileURL else { return false }
             if !source {
                 let directory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
@@ -312,6 +328,15 @@ struct LocationCard: View {
             return true
         } isTargeted: { targeted = $0 }
     }
+
+    private func openInFinder() {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == false {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else if !NSWorkspace.shared.open(url) {
+            store.errorMessage = "Could not open \(path) in Finder."
+        }
+    }
 }
 
 struct LocationStorageView: View {
@@ -319,15 +344,21 @@ struct LocationStorageView: View {
     let path: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             if let volume = monitor.volume(for: path) {
                 if volume.total > 0 {
                     ProgressView(value: volume.usedFraction)
                         .tint(volume.isLow ? .orange : Palette.accent)
                         .accessibilityLabel("\(volume.name) storage used")
                         .accessibilityValue(volume.usedFraction.formatted(.percent.precision(.fractionLength(0))))
+                    HStack {
+                        Text("\(ByteCountFormatter.string(fromByteCount: volume.total - volume.available, countStyle: .file)) used")
+                        Spacer()
+                        Text("\(ByteCountFormatter.string(fromByteCount: volume.total, countStyle: .file)) total")
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
                 }
-                Text(volume.capacityLabel).font(.system(size: 10)).foregroundStyle(.secondary)
             } else {
                 Label("Volume unavailable", systemImage: "externaldrive.badge.questionmark")
                     .font(.system(size: 10)).foregroundStyle(.red)
