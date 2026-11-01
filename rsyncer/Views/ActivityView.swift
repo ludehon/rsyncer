@@ -44,6 +44,9 @@ struct ActivityView: View {
                         ProgressView().progressViewStyle(.linear)
                     }
                     Text(statusDetail).font(.system(size: 11)).foregroundStyle(.secondary)
+                    if !store.runIssues.isEmpty {
+                        RunIssueReport(issues: store.runIssues)
+                    }
                     if !store.currentItem.isEmpty, !store.cancelling {
                         Text(store.currentItem).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
@@ -76,20 +79,52 @@ struct ActivityView: View {
                 }.frame(maxWidth: .infinity).padding(.vertical, 28)
             }
             ForEach(records) { record in
-                HStack(spacing: 12) {
-                    Image(systemName: record.cancelled ? "stop.circle" : record.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                        .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(record.title).font(.system(size: 12, weight: .medium))
-                        Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Image(systemName: record.cancelled ? "stop.circle" : record.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .foregroundStyle(record.succeeded ? Palette.accent : .orange).font(.system(size: 18))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(record.title).font(.system(size: 12, weight: .medium))
+                            Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
+                        Button { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) } label: { Image(systemName: "doc.text") }.help("Open run log")
                     }
-                    Spacer()
-                    if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
-                    Button { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) } label: { Image(systemName: "doc.text") }.help("Open run log")
+                    if !record.reportedIssues.isEmpty {
+                        RunIssueReport(issues: record.reportedIssues)
+                            .padding(.leading, 30)
+                    }
                 }.padding(.vertical, 8)
                 Divider()
             }
+        }
+    }
+}
+
+private struct RunIssueReport: View {
+    let issues: [RunIssue]
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(issues) { issue in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(issue.path)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                        Text(issue.reasons.map(\.label).sorted().joined(separator: " · "))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Text("Files needing attention (\(issues.count))")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.orange)
         }
     }
 }

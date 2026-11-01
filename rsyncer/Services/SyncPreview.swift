@@ -1,4 +1,31 @@
 import Foundation
+import Darwin
+
+struct DeletionSnapshot: Equatable, Sendable {
+    let device: UInt64
+    let inode: UInt64
+    let mode: UInt32
+    let size: Int64
+    let modifiedSeconds: Int
+    let modifiedNanoseconds: Int
+
+    static func capture(_ path: String) -> DeletionSnapshot? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        return DeletionSnapshot(device: UInt64(info.st_dev), inode: UInt64(info.st_ino),
+                                mode: UInt32(info.st_mode), size: info.st_size,
+                                modifiedSeconds: info.st_mtimespec.tv_sec,
+                                modifiedNanoseconds: info.st_mtimespec.tv_nsec)
+    }
+
+    func stillMatches(_ path: String, directory: Bool) -> Bool {
+        guard let current = Self.capture(path) else { return false }
+        // Removing listed children changes a directory's size and modification time.
+        return directory
+            ? current.device == device && current.inode == inode && current.mode == mode
+            : current == self
+    }
+}
 
 struct PreviewChange: Identifiable {
     enum Kind: String, CaseIterable { case added = "Added", updated = "Updated", deleted = "Deleted" }
@@ -9,6 +36,7 @@ struct PreviewChange: Identifiable {
     let isDirectory: Bool
     let isLink: Bool
     var size: Int64? = nil
+    var deletionSnapshot: DeletionSnapshot? = nil
     var targetPath: String { targetRoot + (relativePath == "." ? "" : "/" + relativePath) }
     var folder: String { (targetPath as NSString).deletingLastPathComponent }
     var name: String { (targetPath as NSString).lastPathComponent }
@@ -19,6 +47,19 @@ struct SyncPreview {
     var changes: [PreviewChange] = []
     var complete = false
     var succeeded = false
+
+    func matches(_ current: SyncPair) -> Bool {
+        pair.id == current.id && pair.source == current.source && pair.destination == current.destination &&
+        pair.direction == current.direction && pair.options == current.options &&
+        pair.sourceMountPath == current.sourceMountPath && pair.destinationMountPath == current.destinationMountPath &&
+        pair.sourceVolumeID == current.sourceVolumeID && pair.destinationVolumeID == current.destinationVolumeID
+    }
+
+    mutating func captureDeletionSnapshots() {
+        for index in changes.indices where changes[index].kind == .deleted {
+            changes[index].deletionSnapshot = DeletionSnapshot.capture(changes[index].targetPath)
+        }
+    }
 
     // Read the complete on-disk output, not the bounded live-output buffer.
     private static func decodeFilename(_ value: String) -> String {

@@ -85,6 +85,56 @@ struct SyncPair: Identifiable, Codable, Equatable {
     var isConfigured: Bool { !source.isEmpty && !destination.isEmpty }
 }
 
+struct RunIssue: Identifiable, Codable, Hashable, Sendable {
+    enum Reason: String, Codable, Hashable, Sendable {
+        case stalled
+        case truncatedSource
+        case incompleteDestination
+
+        var label: String {
+            switch self {
+            case .stalled: "Skipped after transfer stopped making progress"
+            case .truncatedSource: "Source read was truncated"
+            case .incompleteDestination: "Shorter destination copy was skipped"
+            }
+        }
+    }
+
+    var path: String
+    var reasons: Set<Reason>
+    var id: String { path }
+
+    static func fromLog(_ log: String) -> [RunIssue] {
+        var issues: [RunIssue] = []
+        for line in log.components(separatedBy: .newlines) {
+            guard let issue = parse(line) else { continue }
+            if let index = issues.firstIndex(where: { $0.path == issue.path }) {
+                issues[index].reasons.formUnion(issue.reasons)
+            } else {
+                issues.append(issue)
+            }
+        }
+        return issues
+    }
+
+    static func parse(_ line: String) -> RunIssue? {
+        if line.hasPrefix("Skipped stalled file after "),
+           let separator = line.range(of: " seconds without byte progress: ") {
+            return RunIssue(path: String(line[separator.upperBound...]), reasons: [.stalled])
+        }
+        let incomplete = "Incomplete newer destination skipped by --update: "
+        if line.hasPrefix(incomplete) {
+            return RunIssue(path: String(line.dropFirst(incomplete.count)), reasons: [.incompleteDestination])
+        }
+        let truncated = ": file truncated while reading"
+        if line.hasSuffix(truncated), let warning = line.range(of: ": warning: ") {
+            let path = line[warning.upperBound..<line.index(line.endIndex, offsetBy: -truncated.count)]
+            return RunIssue(path: String(path), reasons: [.truncatedSource])
+        }
+        return nil
+    }
+}
+
 struct RunRecord: Identifiable, Codable {
     var id = UUID()
     var pairID: UUID
@@ -95,6 +145,9 @@ struct RunRecord: Identifiable, Codable {
     var exitCode: Int32
     var cancelled: Bool
     var logPath: String
+    // Nil in records saved before the issue report was added.
+    var issues: [RunIssue]? = nil
+    var reportedIssues: [RunIssue] { issues ?? [] }
     var succeeded: Bool { exitCode == 0 && !cancelled }
     var title: String { cancelled ? "Cancelled" : succeeded ? (preview ? "Preview complete" : "Sync complete") : "Needs attention" }
     var durationLabel: String {

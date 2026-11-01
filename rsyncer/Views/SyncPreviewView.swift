@@ -62,6 +62,10 @@ struct SyncPreviewView: View {
                     }
                     Text("Sizes describe affected file contents, not transfer bytes or space saved. Folder and link sizes are excluded. Unavailable sizes are marked; updates can include metadata only.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
+                    if preview.succeeded && !preview.changes.isEmpty {
+                        Text("Sync this preview considers only the paths listed here. Changes made elsewhere after Preview are not included.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
                 }
                 if preview.pair.direction == .twoWay {
                     Text("Both directions are compared independently. Each group shows the location that would receive the changes; newer files win during sync.")

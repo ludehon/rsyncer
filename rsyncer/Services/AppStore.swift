@@ -26,6 +26,8 @@ final class AppStore: ObservableObject {
     @Published var itemsTotal = 0
     @Published var currentItem = ""
     @Published var isTransferring = false
+    @Published var skippedFiles = 0
+    @Published var runIssues: [RunIssue] = []
     @Published var currentLogURL: URL?
     @Published var loginEnabled = false
     @Published var loginNeedsApproval = false
@@ -41,6 +43,7 @@ final class AppStore: ObservableObject {
     let dataDirectory: URL
     let logsDirectory: URL
     private var runner: RsyncRunner?
+    private var activePlanDirectory: URL?
     private var timer: Timer?
     private var pendingMounts: Set<UUID> = []
     private var retryAfter: [UUID: Date] = [:]
@@ -59,7 +62,14 @@ final class AppStore: ObservableObject {
                 let state = try JSONDecoder().decode(PersistedState.self, from: Data(contentsOf: stateURL))
                 guard state.version == 1 else { throw SyncError.invalid("This settings file was created by a newer version of rsyncer.") }
                 pairs = state.pairs
-                history = state.history
+                history = state.history.map { saved in
+                    var record = saved
+                    if record.issues == nil, !record.succeeded,
+                       let log = try? String(contentsOfFile: record.logPath, encoding: .utf8) {
+                        record.issues = RunIssue.fromLog(log)
+                    }
+                    return record
+                }
             }
         } catch {
             persistenceAvailable = false
@@ -172,11 +182,41 @@ final class AppStore: ObservableObject {
     func start(_ pair: SyncPair, preview: Bool) {
         guard !isRunning else { return }
         do { try RsyncCommand.validate(pair) } catch { errorMessage = error.localizedDescription; return }
+        begin(pair: pair, preview: preview, passes: RsyncCommand.passes(for: pair, preview: preview),
+              plannedDeletions: [])
+    }
+
+    func canSyncPreview(_ pair: SyncPair) -> Bool {
+        guard !isRunning, let preview = syncPreview else { return false }
+        return preview.complete && preview.succeeded && !preview.changes.isEmpty && preview.matches(pair)
+    }
+
+    func startPreviewSync(_ pair: SyncPair) {
+        guard !isRunning else { return }
+        do {
+            try RsyncCommand.validate(pair)
+            guard let preview = syncPreview else { throw SyncError.invalid("Run Preview before syncing its plan.") }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("rsyncer-preview-\(UUID().uuidString)", isDirectory: true)
+            do {
+                let plan = try RsyncCommand.previewPlan(preview, for: pair, in: directory)
+                activePlanDirectory = directory
+                begin(pair: pair, preview: false, passes: plan.passes, plannedDeletions: plan.deletions,
+                      planSync: true)
+            } catch {
+                try? FileManager.default.removeItem(at: directory)
+                throw error
+            }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func begin(pair: SyncPair, preview: Bool, passes: [[String]],
+                       plannedDeletions: [PlannedDeletion], planSync: Bool = false) {
         let started = Date()
         let logURL = logsDirectory.appendingPathComponent("\(ISO8601DateFormatter().string(from: started).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString.prefix(8)).log")
-        let command = RsyncCommand.display(for: pair, preview: preview)
+        let command = RsyncCommand.display(passes: passes)
         let previewNote = preview && pair.options.extendedAttributes ? "\nPreview covers file changes. Extended attributes and resource forks are copied during sync, but are not compared in this preview.\n" : ""
-        let heading = "rsyncer • \(pair.name)\n\(preview ? "PREVIEW — no changes will be made" : "SYNC") • \(started.formatted())\n\(command)\n\(previewNote)\n"
+        let planNote = planSync ? "\nOnly paths in the completed preview are considered. Other changes made since Preview are not discovered.\n" : ""
+        let heading = "rsyncer • \(pair.name)\n\(preview ? "PREVIEW — no changes will be made" : planSync ? "SYNC THIS PREVIEW" : "SYNC") • \(started.formatted())\n\(command)\n\(previewNote)\(planNote)\n"
         activePairID = pair.id
         activePairName = pair.name
         isPreview = preview
@@ -193,7 +233,8 @@ final class AppStore: ObservableObject {
         let worker = RsyncRunner()
         runner = worker
         Task {
-            for await event in worker.runDisplay(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: heading, preview: preview) {
+            for await event in worker.runDisplay(passes: passes, logURL: logURL, heading: heading,
+                                                 preview: preview, plannedDeletions: plannedDeletions) {
                 switch event {
                 case .update(let snapshot):
                     if output != snapshot.output { output = snapshot.output }
@@ -204,6 +245,8 @@ final class AppStore: ObservableObject {
                     if itemsChecked != snapshot.itemsChecked { itemsChecked = snapshot.itemsChecked }
                     if currentItem != snapshot.currentItem { currentItem = snapshot.currentItem }
                     if isTransferring != snapshot.isTransferring { isTransferring = snapshot.isTransferring }
+                    if skippedFiles != snapshot.skippedFiles { skippedFiles = snapshot.skippedFiles }
+                    if runIssues != snapshot.issues { runIssues = snapshot.issues }
                 case .finished(let code, let cancelled):
                     finish(pair: pair, started: started, preview: preview, code: code, cancelled: cancelled, logURL: logURL)
                 case .failed(let message):
@@ -218,14 +261,22 @@ final class AppStore: ObservableObject {
         if preview {
             do {
                 let log = try String(contentsOf: logURL, encoding: .utf8)
-                syncPreview = SyncPreview(pair: pair, changes: SyncPreview.parse(log, pair: pair),
-                                          complete: true, succeeded: code == 0 && !cancelled)
+                var result = SyncPreview(pair: pair, changes: SyncPreview.parse(log, pair: pair),
+                                         complete: true, succeeded: code == 0 && !cancelled)
+                if result.succeeded { result.captureDeletionSnapshots() }
+                syncPreview = result
             } catch {
                 syncPreview = SyncPreview(pair: pair, complete: true)
                 errorMessage = "Could not read the preview: \(error.localizedDescription)"
             }
         }
-        let record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path)
+        if !preview && code == 0 && !cancelled { syncPreview = nil }
+        if let activePlanDirectory {
+            try? FileManager.default.removeItem(at: activePlanDirectory)
+            self.activePlanDirectory = nil
+        }
+        var record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path)
+        record.issues = runIssues
         history.insert(record, at: 0)
         history = Array(history.prefix(250))
         if let index = pairs.firstIndex(where: { $0.id == pair.id }), !preview {
@@ -244,7 +295,9 @@ final class AppStore: ObservableObject {
         isPaused = false
         if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
         if !record.succeeded && !cancelled && errorMessage == nil {
-            errorMessage = "rsync exited with code \(code). Some files may not have transferred. Open the run log for details."
+            errorMessage = !runIssues.isEmpty
+                ? "Sync needs attention for \(runIssues.count) file(s). See their names in Activity and repair the source before retrying."
+                : "rsync exited with code \(code). Some files may not have transferred. Open the run log for details."
         }
         volumes.refresh()
         save()
@@ -255,6 +308,8 @@ final class AppStore: ObservableObject {
         itemsTotal = 0
         currentItem = ""
         isTransferring = false
+        skippedFiles = 0
+        runIssues = []
     }
 
     func togglePause() {
