@@ -91,7 +91,7 @@ struct SyncOptionsView: View {
                     OptionsSection(title: "Comparison & transfers", symbol: "arrow.triangle.2.circlepath") {
                         OptionRow(title: "Compare file contents", detail: "Use checksums instead of size and date to detect changes. Reads every file and can take longer.", value: $options.checksum)
                         Divider()
-                        OptionRow(title: "Keep partial transfers", detail: "Keep incomplete files so a later sync can reuse transferred data.", value: $options.keepPartial)
+                        OptionRow(title: "Keep partial transfers", detail: "Keep incomplete files in a separate folder so a later sync can reuse transferred data.", value: $options.keepPartial)
                         Divider()
                         OptionRow(title: "Compress transfers", detail: "Compress data during transfer. Usually unnecessary for local drives.", value: $options.compress)
                         Divider()

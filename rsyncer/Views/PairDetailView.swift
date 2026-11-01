@@ -6,6 +6,7 @@ struct PairDetailView: View {
     let pairID: UUID
     @Binding var tab: DetailTab
     @State private var confirmMirror = false
+    @State private var confirmPreviewDeletion = false
     @State private var hoveringMode = false
     enum DetailTab: String, CaseIterable { case activity = "Activity", preview = "Preview", schedule = "Schedule", options = "Options" }
     private var pair: SyncPair { store.pairs.first { $0.id == pairID } ?? SyncPair() }
@@ -98,6 +99,12 @@ struct PairDetailView: View {
         .confirmationDialog("Delete extra destination files?", isPresented: $confirmMirror) {
             Button("Sync and delete extra files", role: .destructive) { store.start(pair, preview: false); tab = .activity }
         } message: { Text("Files in \(pair.destination) that do not exist in the source may be permanently deleted. Run a preview first to review the changes.") }
+        .confirmationDialog("Delete the items shown in Preview?", isPresented: $confirmPreviewDeletion) {
+            Button("Sync this preview and delete", role: .destructive) {
+                store.startPreviewSync(pair)
+                if store.isRunning { tab = .activity }
+            }
+        } message: { Text("Only the paths shown in the completed preview will be considered. Planned deletions bypass the Trash. Changes made elsewhere since Preview will not be found.") }
     }
 
     private var footer: some View {
@@ -158,6 +165,27 @@ struct PairDetailView: View {
                         .buttonStyle(.plain)
                         .opacity(!pair.isConfigured || store.isRunning ? 0.4 : 1)
                         .disabled(!pair.isConfigured || store.isRunning)
+                    if tab == .preview, let preview = store.syncPreview,
+                       preview.pair.id == pairID, preview.complete, !preview.changes.isEmpty {
+                        Button {
+                            if preview.changes.contains(where: { $0.kind == .deleted }) {
+                                confirmPreviewDeletion = true
+                            } else {
+                                store.startPreviewSync(pair)
+                                if store.isRunning { tab = .activity }
+                            }
+                        } label: {
+                            Label("Sync this preview", systemImage: "checkmark.circle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 18).frame(height: 30)
+                                .background(Palette.accent, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(store.canSyncPreview(pair) ? 1 : 0.4)
+                        .disabled(!store.canSyncPreview(pair))
+                    }
                     Button {
                         if pair.direction == .oneWay && pair.options.deleteExtraneous { confirmMirror = true }
                         else { store.start(pair, preview: false); tab = .activity }

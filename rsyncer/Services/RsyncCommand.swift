@@ -1,8 +1,52 @@
 import Foundation
+import Darwin
 
 enum SyncError: LocalizedError {
     case invalid(String)
     var errorDescription: String? { switch self { case .invalid(let message): message } }
+}
+
+struct PlannedDeletion: Sendable {
+    let sourceRoot: String
+    let targetRoot: String
+    let relativePath: String
+    let isDirectory: Bool
+    let snapshot: DeletionSnapshot
+
+    var targetPath: String { targetRoot + "/" + relativePath }
+
+    func validate() throws {
+        guard let sourcePath = RsyncCommand.safeChild(relativePath, of: sourceRoot),
+              let targetPath = RsyncCommand.safeChild(relativePath, of: targetRoot),
+              snapshot.stillMatches(targetPath, directory: isDirectory) else {
+            throw SyncError.invalid("A planned deletion changed since Preview. Run Preview again before deleting files.")
+        }
+        var sourceInfo = stat()
+        guard lstat(sourcePath, &sourceInfo) != 0, errno == ENOENT else {
+            throw SyncError.invalid("A previewed deletion now exists at the source. Run Preview again.")
+        }
+        var parent = (targetPath as NSString).deletingLastPathComponent
+        while parent != targetRoot {
+            var info = stat()
+            guard lstat(parent, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else {
+                throw SyncError.invalid("A planned deletion's parent folder changed since Preview. Run Preview again.")
+            }
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+    }
+
+    func apply() throws {
+        try validate()
+        let result = isDirectory ? rmdir(targetPath) : unlink(targetPath)
+        guard result == 0 else {
+            throw SyncError.invalid("Could not remove a previewed item. It may have changed or contain new files. Run Preview again.")
+        }
+    }
+}
+
+struct PreviewSyncPlan {
+    let passes: [[String]]
+    let deletions: [PlannedDeletion]
 }
 
 enum RsyncCommand {
@@ -99,14 +143,16 @@ enum RsyncCommand {
         guard pair.options.bandwidthLimit >= 0 else { throw SyncError.invalid("Bandwidth limit cannot be negative.") }
     }
 
-    static func arguments(for pair: SyncPair, preview: Bool) -> [String] {
+    static func arguments(for pair: SyncPair, preview: Bool, filesFrom: URL? = nil) -> [String] {
         var o = pair.options
         if pair.direction == .twoWay {
             o.preserveTimes = true
             o.skipNewer = true
             o.deleteExtraneous = false
         }
-        var args = ["--recursive", "--verbose", "--itemize-changes", "--progress", "--stats"]
+        var args = ["--verbose", "--itemize-changes", "--progress", "--stats"]
+        if filesFrom == nil { args.insert("--recursive", at: 0) }
+        else { args += ["--dirs", "--from0", "--files-from=\(filesFrom!.path)"] }
         // openrsync refreshes every already-synced file's timestamp on the destination
         // before it copies anything, which is slow on FUSE and network volumes and
         // passes in silence at -v. At -vvv its receiver reports each entry as it is
@@ -119,8 +165,8 @@ enum RsyncCommand {
             // Preview plans file changes; Mac metadata is copied only during the real run.
             (o.preserveLinks, "--links"), (o.extendedAttributes && !preview, "--extended-attributes"),
             (o.checksum, "--checksum"), (o.skipNewer, "--update"),
-            (o.ignoreExisting, "--ignore-existing"), (o.deleteExtraneous, "--delete-after"),
-            (o.keepPartial, "--partial"), (o.compress, "--compress"),
+            (o.ignoreExisting, "--ignore-existing"), (o.deleteExtraneous && filesFrom == nil, "--delete-after"),
+            (o.keepPartial && !preview, "--partial-dir=.rsyncer-partial"), (o.compress, "--compress"),
             (o.wholeFile, "--whole-file"), (o.oneFileSystem, "--one-file-system"),
             (o.preserveHardLinks, "--hard-links"), (preview, "--dry-run")
         ]
@@ -129,6 +175,7 @@ enum RsyncCommand {
         args.append("--out-format=RSYNCER2|%i|%l|%n")
         if o.bandwidthLimit > 0 { args.append("--bwlimit=\(o.bandwidthLimit)") }
         if o.excludeHidden { args.append("--exclude=.*") }
+        if !preview { args.append("--exclude=.rsyncer-partial/") }
         for pattern in o.excludePatterns.components(separatedBy: .newlines) where !pattern.isEmpty {
             args.append("--exclude=\(pattern)")
         }
@@ -138,6 +185,46 @@ enum RsyncCommand {
         // Trailing slash copies a directory's contents, avoiding an extra nested folder.
         args += ["--", source + (isDirectory.boolValue ? "/" : ""), url(for: pair.destination).path + "/"]
         return args
+    }
+
+    static func excluding(_ paths: [String], from arguments: [String]) -> [String] {
+        guard !paths.isEmpty else { return arguments }
+        guard let separator = arguments.firstIndex(of: "--") else { return arguments }
+        let rules = paths.map { path in
+            let escaped = path.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "*", with: "\\*")
+                .replacingOccurrences(of: "?", with: "\\?")
+                .replacingOccurrences(of: "[", with: "\\[")
+                .replacingOccurrences(of: "]", with: "\\]")
+            return "--exclude=/" + escaped
+        }
+        return arguments[..<separator].filter { $0 != "--delete-after" } + rules + Array(arguments[separator...])
+    }
+
+    /// --update protects newer destinations, including incomplete files left
+    /// by older runs that used --partial. Surface those instead of claiming success.
+    static func shorterSkippedDestinations(in output: String, passes: [[String]]) -> [String] {
+        let names = Set(output.components(separatedBy: .newlines).compactMap { line -> String? in
+            guard line.hasPrefix("Skip newer '") else { return nil }
+            return ProcessedItem.parse(line)?.path
+        })
+        return names.filter { name in
+            passes.contains { arguments in
+                guard let separator = arguments.firstIndex(of: "--"),
+                      arguments.count > separator + 2 else { return false }
+                let sourceRoot = arguments[separator + 1].hasSuffix("/")
+                    ? String(arguments[separator + 1].dropLast()) : arguments[separator + 1]
+                let destinationRoot = arguments[separator + 2].hasSuffix("/")
+                    ? String(arguments[separator + 2].dropLast()) : arguments[separator + 2]
+                guard let source = safeChild(name, of: sourceRoot),
+                      let destination = safeChild(name, of: destinationRoot),
+                      let sourceInfo = try? FileManager.default.attributesOfItem(atPath: source),
+                      let destinationInfo = try? FileManager.default.attributesOfItem(atPath: destination),
+                      let sourceSize = sourceInfo[.size] as? NSNumber,
+                      let destinationSize = destinationInfo[.size] as? NSNumber else { return false }
+                return destinationSize.int64Value < sourceSize.int64Value
+            }
+        }.sorted()
     }
 
     static func passes(for pair: SyncPair, preview: Bool) -> [[String]] {
@@ -152,8 +239,77 @@ enum RsyncCommand {
         return passes
     }
 
+    static func safeChild(_ relativePath: String, of root: String) -> String? {
+        guard relativePath != ".", !relativePath.isEmpty, !relativePath.hasPrefix("/"),
+              !relativePath.contains("\0") else { return nil }
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
+        return root + "/" + relativePath
+    }
+
+    static func previewPlan(_ preview: SyncPreview, for pair: SyncPair, in directory: URL) throws -> PreviewSyncPlan {
+        guard preview.complete, preview.succeeded, preview.matches(pair), !preview.changes.isEmpty else {
+            throw SyncError.invalid("This preview is incomplete or its settings changed. Run Preview again.")
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var passes: [[String]] = []
+        var deletions: [PlannedDeletion] = []
+        var directions = [pair]
+        if pair.direction == .twoWay {
+            var reverse = pair
+            swap(&reverse.source, &reverse.destination)
+            directions.append(reverse)
+        }
+        for (index, direction) in directions.enumerated() {
+            let sourceRoot = url(for: direction.source).path
+            let targetRoot = url(for: direction.destination).path
+            let selected = preview.changes.filter { $0.targetRoot == targetRoot }
+            let copies = selected.filter { $0.kind != .deleted }
+            let removes = selected.filter { $0.kind == .deleted }
+            guard pair.options.deleteExtraneous || removes.isEmpty else {
+                throw SyncError.invalid("The preview contains unexpected deletions. Run Preview again.")
+            }
+            for change in copies {
+                guard change.relativePath == "." && change.isDirectory || safeChild(change.relativePath, of: sourceRoot) != nil else {
+                    throw SyncError.invalid("A previewed path cannot be safely synced. Run a full sync instead.")
+                }
+            }
+            for change in removes {
+                guard let snapshot = change.deletionSnapshot,
+                      safeChild(change.relativePath, of: targetRoot) != nil else {
+                    throw SyncError.invalid("A planned deletion cannot be safely applied. Run Preview again.")
+                }
+                deletions.append(PlannedDeletion(sourceRoot: sourceRoot, targetRoot: targetRoot,
+                                                 relativePath: change.relativePath,
+                                                 isDirectory: change.isDirectory, snapshot: snapshot))
+            }
+            var sourceIsDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: sourceRoot, isDirectory: &sourceIsDirectory)
+            if sourceIsDirectory.boolValue {
+                let listURL = directory.appendingPathComponent("pass-\(index + 1).txt")
+                let names = Array(Set(copies.map(\.relativePath))).sorted()
+                try Data((names.isEmpty ? "" : names.joined(separator: "\0") + "\0").utf8).write(to: listURL, options: .atomic)
+                passes.append(arguments(for: direction, preview: false, filesFrom: listURL))
+            } else {
+                guard removes.isEmpty else { throw SyncError.invalid("A file-source preview cannot include deletions.") }
+                var args = arguments(for: direction, preview: false)
+                args.removeAll { $0 == "--delete-after" }
+                passes.append(args)
+            }
+        }
+        guard preview.changes.allSatisfy({ change in
+            directions.contains { url(for: $0.destination).path == change.targetRoot }
+        }) else { throw SyncError.invalid("The preview contains paths outside this sync pair.") }
+        return PreviewSyncPlan(passes: passes,
+                               deletions: deletions.sorted { $0.relativePath.split(separator: "/").count > $1.relativePath.split(separator: "/").count })
+    }
+
     static func display(for pair: SyncPair, preview: Bool) -> String {
-        passes(for: pair, preview: preview).map { arguments in
+        display(passes: passes(for: pair, preview: preview))
+    }
+
+    static func display(passes: [[String]]) -> String {
+        passes.map { arguments in
             ([executable] + arguments).map {
             "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
@@ -237,6 +393,13 @@ struct ProcessedItem: Equatable {
     let path: String
 
     static func parse(_ line: String) -> ProcessedItem? {
+        if line.hasPrefix("RSYNCER2|") {
+            let fields = line.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false)
+            guard fields.count == 4, let status = fields[1].first, let kind = fields[1].dropFirst().first,
+                  "<>ch.".contains(status), "fdLDS".contains(kind),
+                  !fields[3].isEmpty else { return nil }
+            return ProcessedItem(path: normalize(fields[3]))
+        }
         if line.hasPrefix("Skip newer '"), line.hasSuffix("'"), line.count > 13 {
             return ProcessedItem(path: normalize(line.dropFirst(12).dropLast()))
         }

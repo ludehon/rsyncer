@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct SyncOptions: Codable, Equatable {
     // Optional storage keeps settings from older releases decodable.
@@ -125,6 +126,98 @@ struct SyncPair: Identifiable, Codable, Equatable {
     var isConfigured: Bool { !source.isEmpty && !destination.isEmpty }
 }
 
+struct RunIssue: Identifiable, Codable, Hashable, Sendable {
+    enum Reason: String, Codable, Hashable, Sendable {
+        case stalled
+        case truncatedSource
+        case incompleteDestination
+        case excludedUncopied
+
+        var label: String {
+            switch self {
+            case .stalled: "Skipped after transfer stopped making progress"
+            case .truncatedSource: "Source read was truncated"
+            case .incompleteDestination: "Shorter destination copy was skipped"
+            case .excludedUncopied: "Excluded from this sync; destination copy is missing or shorter"
+            }
+        }
+    }
+
+    var path: String
+    var reasons: Set<Reason>
+    var id: String { path }
+
+    static func fromLog(_ log: String) -> [RunIssue] {
+        var issues: [RunIssue] = []
+        for line in log.components(separatedBy: .newlines) {
+            guard let issue = parse(line) else { continue }
+            if let index = issues.firstIndex(where: { $0.path == issue.path }) {
+                issues[index].reasons.formUnion(issue.reasons)
+            } else {
+                issues.append(issue)
+            }
+        }
+        return issues
+    }
+
+    static func merging(_ issues: [RunIssue]) -> [RunIssue] {
+        var merged: [RunIssue] = []
+        for issue in issues {
+            if let index = merged.firstIndex(where: { $0.path == issue.path }) {
+                merged[index].reasons.formUnion(issue.reasons)
+            } else {
+                merged.append(issue)
+            }
+        }
+        return merged
+    }
+
+    // Only literal, relative file exclusions can identify a precise uncopied path.
+    // Patterns and intentionally excluded files already present at the destination
+    // are not reported as transfer errors.
+    static func excludedUncopied(for pair: SyncPair, command: String? = nil) -> [RunIssue] {
+        let sourceRoot = RsyncCommand.url(for: pair.source).path
+        let destinationRoot = RsyncCommand.url(for: pair.destination).path
+        let issues: [RunIssue] = pair.options.excludePatterns.components(separatedBy: .newlines).compactMap { pattern in
+            let path = pattern.hasPrefix("/") ? String(pattern.dropFirst()) : pattern
+            guard path.contains("/"), !path.contains(where: { "*?[]\\".contains($0) }),
+                  let source = RsyncCommand.safeChild(path, of: sourceRoot),
+                  let destination = RsyncCommand.safeChild(path, of: destinationRoot) else { return nil }
+            if let command {
+                let quoted = "'--exclude=" + pattern.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                guard command.contains(quoted) else { return nil }
+            }
+            var sourceInfo = stat()
+            guard stat(source, &sourceInfo) == 0, sourceInfo.st_mode & S_IFMT == S_IFREG else { return nil }
+            var destinationInfo = stat()
+            if stat(destination, &destinationInfo) == 0 {
+                guard destinationInfo.st_mode & S_IFMT != S_IFREG || destinationInfo.st_size < sourceInfo.st_size else { return nil }
+            } else {
+                guard errno == ENOENT else { return nil }
+            }
+            return RunIssue(path: path, reasons: [.excludedUncopied])
+        }
+        return merging(issues)
+    }
+
+    static func parse(_ line: String) -> RunIssue? {
+        if line.hasPrefix("Skipped stalled file after "),
+           let separator = line.range(of: " seconds without byte progress: ") {
+            return RunIssue(path: String(line[separator.upperBound...]), reasons: [.stalled])
+        }
+        let incomplete = "Incomplete newer destination skipped by --update: "
+        if line.hasPrefix(incomplete) {
+            return RunIssue(path: String(line.dropFirst(incomplete.count)), reasons: [.incompleteDestination])
+        }
+        let truncated = ": file truncated while reading"
+        if line.hasSuffix(truncated), let warning = line.range(of: ": warning: ") {
+            let path = line[warning.upperBound..<line.index(line.endIndex, offsetBy: -truncated.count)]
+            return RunIssue(path: String(path), reasons: [.truncatedSource])
+        }
+        return nil
+    }
+}
+
 struct RunChange: Codable, Equatable, Identifiable {
     var id: String { "\(kind)|\(targetRoot)|\(path)" }
     var kind: String
@@ -155,7 +248,10 @@ struct RunRecord: Identifiable, Codable {
     var exitCode: Int32
     var cancelled: Bool
     var logPath: String
-    var summary: RunSummary?
+    // Nil in records saved before the issue report was added.
+    var issues: [RunIssue]? = nil
+    var reportedIssues: [RunIssue] { issues ?? [] }
+    var summary: RunSummary? = nil
     var succeeded: Bool { exitCode == 0 && !cancelled }
     var title: String { cancelled ? "Cancelled" : succeeded ? (preview ? "Preview complete" : "Sync complete") : "Needs attention" }
     var durationLabel: String {

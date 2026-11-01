@@ -26,7 +26,9 @@ To install from a DMG, open it, drag **Rsyncer** onto **Applications**, then eje
 
 1. Click **+** beside **Saved syncs** and choose a one-way or two-way sync.
 2. Drop in the source and destination, or browse to them, then choose the transfer options and schedule.
-3. Select **Preview** to review the plan, then **Sync now** to run it.
+3. Select **Preview** to review the plan. Choose **Sync this preview** to apply only the listed paths, or **Sync now** to scan both locations again and include later changes.
+
+**Sync this preview** is available after a completed preview with changes. It does not discover files added or changed elsewhere after the preview. Planned deletions are applied only if their targets still match the preview; excluded and later-added destination files are left alone. Run Preview again if the locations or sync options change.
 
 If you enable **Launch at login**, macOS may require approval under **System Settings → General → Login Items**.
 

@@ -23,11 +23,14 @@ struct IntegrationTests {
             do { try RsyncCommand.validate(pair) } catch { print("PASS: \(message)"); return }
             throw SyncError.invalid("FAIL: \(message)")
         }
-        func run(_ pair: SyncPair, preview: Bool = false, worker: RsyncRunner = RsyncRunner(), onOutput: ((String) -> Void)? = nil) async throws -> (Int32, Bool, String) {
+        func run(_ pair: SyncPair, preview: Bool = false, plan: PreviewSyncPlan? = nil,
+                 worker: RsyncRunner = RsyncRunner(), onOutput: ((String) -> Void)? = nil) async throws -> (Int32, Bool, String) {
             let logURL = root.appendingPathComponent("\(UUID()).log")
             var result: (Int32, Bool)?
             var output = ""
-            for await event in worker.run(passes: RsyncCommand.passes(for: pair, preview: preview), logURL: logURL, heading: "Integration test\n") {
+            for await event in worker.run(passes: plan?.passes ?? RsyncCommand.passes(for: pair, preview: preview),
+                                          logURL: logURL, heading: "Integration test\n",
+                                          plannedDeletions: plan?.deletions ?? []) {
                 switch event {
                 case .output(let text): output += text; onOutput?(text)
                 case .finished(let code, let cancelled): result = (code, cancelled)
@@ -76,19 +79,167 @@ struct IntegrationTests {
         display.consume(".f        photo-1999.ARW\n")
         try expect(display.snapshot(at: 0.05) == nil, "A burst does not publish per-item UI updates")
         let burst = display.snapshot(at: 0.1)
-        try expect(burst?.itemsChecked == 2000 && burst?.progress == 1, "Batched progress counts every unique item")
+        try expect(burst?.itemsChecked == 2000 && burst?.progress == 0.99, "Active progress stays below 100 percent after every item is checked")
         try expect(burst?.currentItem == "photo-1999.ARW" && burst?.output.contains("skipping: up to date") == false, "Snapshots retain latest item and omit diagnostics")
         display.consume("Pass 2/2: Destination → Source\nTransfer starting: 2 files\n.f        photo-1999.ARW\n")
         let finalSnapshot = display.snapshot(at: 0.11, force: true)
         try expect(finalSnapshot?.itemsChecked == 1 && finalSnapshot?.itemsTotal == 2, "Second pass resets counts and deduplication")
         try expect(finalSnapshot?.progress == 0.5, "Completion flushes changes within the throttle interval")
+        var transferDisplay = RunDisplayAccumulator(heading: "Transfer test\n", preview: false)
+        transferDisplay.consume("Transfer starting: 18909 files\nRSYNCER2|>f+++++++|26471178|PARIS/DSC00310.dng\n 65536 0% 100KB/s 00:04:35\n")
+        transferDisplay.consume("rsync(42): : travail/a3.png: skipping: up to date\n")
+        let activeTransfer = transferDisplay.snapshot(at: 0, force: true)
+        try expect(activeTransfer?.currentItem == "PARIS/DSC00310.dng", "Later checks do not replace the active transfer filename")
+        try expect(activeTransfer?.itemsChecked == 2, "Formatted transfer entries and diagnostics count as checked items")
+        try expect(activeTransfer?.detail.hasSuffix("items checked") == true, "Item counter describes checks rather than completed transfers")
+        transferDisplay.consume("rsync(42): : later.png: skipping: up to date\n")
+        try expect(transferDisplay.snapshot(at: 0.1, force: true)?.currentItem == "PARIS/DSC00310.dng", "Active filename remains stable while other items are checked")
+        var stallDisplay = RunDisplayAccumulator(heading: "Stall test\n", preview: false)
+        stallDisplay.consume("Skipped stalled file after 120 seconds without byte progress: bad.dng\n")
+        try expect(stallDisplay.snapshot(at: 0, force: true)?.skippedFiles == 1, "Skipped files are visible in run state")
+        stallDisplay.consume("rsync(42): warning: bad.dng: file truncated while reading\n")
+        stallDisplay.consume("Incomplete newer destination skipped by --update: short.dng\n")
+        stallDisplay.consume("Pass 2/2: Destination → Source\n")
+        let reported = stallDisplay.snapshot(at: 0.1, force: true)?.issues ?? []
+        try expect(reported.count == 2 && reported.first?.reasons == [.stalled, .truncatedSource],
+                   "Issue report merges reasons for each path and survives a second pass")
+        try expect(reported.last?.reasons == [.incompleteDestination], "Incomplete destination copies appear in the report")
+        let oldLog = "rsync(42): warning: PARIS/DSC00353.dng: file truncated while reading\n"
+        try expect(RunIssue.fromLog(oldLog).first?.path == "PARIS/DSC00353.dng", "Older run logs can supply missing issue reports")
+        let stall = TransferStallTracker()
+        stall.observe(">f+++++++ bad.dng\n 65536 1% 1KB/s 00:00:01\r", at: 10)
+        try expect(stall.stalledPath(at: 39, timeout: 30, paused: false) == nil, "Moving transfer is not skipped before 30 seconds")
+        stall.observe(" 131072 2% 1KB/s 00:00:02\r", at: 39)
+        try expect(stall.stalledPath(at: 68, timeout: 30, paused: false) == nil, "New bytes restart the 30-second stall timer")
+        try expect(stall.stalledPath(at: 70, timeout: 30, paused: false) == "bad.dng", "Stopped transfer identifies the file to skip")
+        let pausedStall = TransferStallTracker()
+        pausedStall.observe(">f+++++++ paused.dng\n", at: 0)
+        try expect(pausedStall.stalledPath(at: 100, timeout: 5, paused: true) == nil, "Paused transfers are not skipped")
+        try expect(pausedStall.stalledPath(at: 104, timeout: 5, paused: false) == nil, "Resume receives a fresh timeout")
+        let fakeRsync = root.appendingPathComponent("stall-fixture.sh")
+        try """
+        #!/bin/sh
+        for arg do
+          if [ "$arg" = '--exclude=/bad.dng' ]; then
+            echo '>f+++++++ good.dng'
+            echo '100 100% 1KB/s 00:00:00'
+            exit 0
+          fi
+        done
+        echo '>f+++++++ bad.dng'
+        echo '65536 1% 1KB/s 00:00:01'
+        exec sleep 10
+        """.write(to: fakeRsync, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeRsync.path)
+        let stalledLog = root.appendingPathComponent("stalled.log")
+        var stallResult: (Int32, Bool)?
+        for await event in RsyncRunner(executableURL: fakeRsync).run(
+            passes: [["--", source.path, destination.path]], logURL: stalledLog,
+            heading: "Stall fixture\n", skipStalledFiles: true, stallTimeout: 0.3) {
+            if case .finished(let code, let cancelled) = event { stallResult = (code, cancelled) }
+            if case .failed(let message) = event { throw SyncError.invalid(message) }
+        }
+        let stalledText = try String(contentsOf: stalledLog, encoding: .utf8)
+        try expect(stallResult?.0 == 23 && stallResult?.1 == false, "A stalled file is skipped but the run remains incomplete")
+        try expect(stalledText.contains("Skipped stalled file after") && stalledText.contains("bad.dng") && stalledText.contains("good.dng"), "Retry logs the skipped file and continues with other files")
+        let manyStallsRsync = root.appendingPathComponent("many-stalls-fixture.sh")
+        try """
+        #!/bin/sh
+        index=1
+        while [ "$index" -le 21 ]; do
+          excluded=0
+          for arg do
+            if [ "$arg" = "--exclude=/bad-$index.dng" ]; then excluded=1; break; fi
+          done
+          if [ "$excluded" -eq 0 ]; then
+            echo ">f+++++++ bad-$index.dng"
+            echo '65536 1% 1KB/s 00:00:01'
+            exec sleep 10
+          fi
+          index=$((index + 1))
+        done
+        echo '>f+++++++ good.dng'
+        echo '100 100% 1KB/s 00:00:00'
+        """.write(to: manyStallsRsync, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: manyStallsRsync.path)
+        let manyStallsLog = root.appendingPathComponent("many-stalls.log")
+        var manyStallsResult: (Int32, Bool)?
+        for await event in RsyncRunner(executableURL: manyStallsRsync).run(
+            passes: [["--", source.path, destination.path]], logURL: manyStallsLog,
+            heading: "Many stalls fixture\n", skipStalledFiles: true, stallTimeout: 0.3) {
+            if case .finished(let code, let cancelled) = event { manyStallsResult = (code, cancelled) }
+            if case .failed(let message) = event { throw SyncError.invalid(message) }
+        }
+        let manyStallsText = try String(contentsOf: manyStallsLog, encoding: .utf8)
+        try expect(manyStallsResult?.0 == 23 && !manyStallsResult!.1 &&
+                   manyStallsText.components(separatedBy: "Skipped stalled file after").count == 22 &&
+                   manyStallsText.contains("good.dng"),
+                   "More than 20 stalled files are excluded and the remaining files still finish")
+        var protectedPair = SyncPair(source: source.path, destination: destination.path)
+        protectedPair.options.deleteExtraneous = true
+        let protectedArguments = RsyncCommand.arguments(for: protectedPair, preview: false)
+        try expect(protectedArguments.contains("--partial-dir=.rsyncer-partial") && !protectedArguments.contains("--partial"), "Interrupted transfers stay outside the final destination path")
+        let excludedArguments = RsyncCommand.excluding(["folder/a[1].dng"], from: protectedArguments)
+        try expect(excludedArguments.contains("--exclude=/folder/a\\[1\\].dng") && !excludedArguments.contains("--delete-after"), "Retry excludes an exact file and does not delete after a skip")
+        let legacySource = root.appendingPathComponent("legacy-source")
+        let legacyDestination = root.appendingPathComponent("legacy-destination")
+        try fm.createDirectory(at: legacySource, withIntermediateDirectories: true)
+        try fm.createDirectory(at: legacyDestination, withIntermediateDirectories: true)
+        try write("short.dng", "complete image", to: legacySource)
+        try write("short.dng", "part", to: legacyDestination)
+        let legacyPass = ["--update", "--", legacySource.path + "/", legacyDestination.path + "/"]
+        try expect(RsyncCommand.shorterSkippedDestinations(in: "Skip newer 'short.dng'\n", passes: [legacyPass]) == ["short.dng"],
+                   "A shorter destination skipped by --update is reported as incomplete")
 
         var durationRecord = RunRecord(pairID: UUID(), pairName: "Duration", startedAt: durationStart, finishedAt: durationStart.addingTimeInterval(59), preview: false, exitCode: 0, cancelled: false, logPath: "")
+        let oldRecord = try JSONDecoder().decode(RunRecord.self, from: JSONEncoder().encode(durationRecord))
+        try expect(oldRecord.reportedIssues.isEmpty, "Saved runs without an issue report still decode")
+        durationRecord.issues = reported
+        let savedRecord = try JSONDecoder().decode(RunRecord.self, from: JSONEncoder().encode(durationRecord))
+        try expect(savedRecord.reportedIssues == reported, "Issue report remains available in run history")
         try expect(durationRecord.durationLabel == "59s", "Short run durations remain in seconds")
         durationRecord.finishedAt = durationStart.addingTimeInterval(60)
         try expect(durationRecord.durationLabel == "1m", "Whole-minute run durations omit zero seconds")
         durationRecord.finishedAt = durationStart.addingTimeInterval(8016)
         try expect(durationRecord.durationLabel == "133m 36s", "Long run durations display minutes and remaining seconds")
+
+        let exclusionSource = root.appendingPathComponent("exclusion-source")
+        let exclusionDestination = root.appendingPathComponent("exclusion-destination")
+        try fm.createDirectory(at: exclusionSource, withIntermediateDirectories: true)
+        try fm.createDirectory(at: exclusionDestination, withIntermediateDirectories: true)
+        let excludedFolder = exclusionSource.appendingPathComponent("folder")
+        try fm.createDirectory(at: excludedFolder, withIntermediateDirectories: true)
+        try write("missing.dng", "complete image", to: excludedFolder)
+        var excludedPair = SyncPair(source: exclusionSource.path, destination: exclusionDestination.path)
+        excludedPair.options.excludePatterns = "folder/missing.dng\n*.tmp"
+        let excludedCommand = RsyncCommand.display(for: excludedPair, preview: false)
+        try expect(RunIssue.excludedUncopied(for: excludedPair, command: excludedCommand) ==
+                   [RunIssue(path: "folder/missing.dng", reasons: [.excludedUncopied])],
+                   "A literal excluded file missing at the destination appears in the run error report")
+        try expect(RunIssue.excludedUncopied(for: excludedPair, command: "unrelated command").isEmpty,
+                   "Historical reports do not inherit exclusions added after the run")
+        let destinationFolder = exclusionDestination.appendingPathComponent("folder")
+        try fm.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
+        try write("missing.dng", "short", to: destinationFolder)
+        try expect(RunIssue.excludedUncopied(for: excludedPair).count == 1,
+                   "A shorter destination copy remains visible as uncopied")
+        try write("missing.dng", "complete image", to: destinationFolder)
+        try expect(RunIssue.excludedUncopied(for: excludedPair).isEmpty,
+                   "An excluded file with a full-size destination copy is not reported as uncopied")
+        try fm.removeItem(at: destinationFolder.appendingPathComponent("missing.dng"))
+        let historicalDirectory = root.appendingPathComponent("historical-issues")
+        try fm.createDirectory(at: historicalDirectory, withIntermediateDirectories: true)
+        let historicalLog = historicalDirectory.appendingPathComponent("old-sync.log")
+        try "rsyncer test\nSYNC\n\(excludedCommand)\n".write(to: historicalLog, atomically: true, encoding: .utf8)
+        let historicalRecord = RunRecord(pairID: excludedPair.id, pairName: "Excluded files", startedAt: durationStart,
+                                         finishedAt: durationStart.addingTimeInterval(10), preview: false,
+                                         exitCode: 0, cancelled: false, logPath: historicalLog.path, issues: [])
+        try JSONEncoder().encode(PersistedState(pairs: [excludedPair], history: [historicalRecord]))
+            .write(to: historicalDirectory.appendingPathComponent("state.json"))
+        let historicalStore = AppStore(dataDirectory: historicalDirectory, enableScheduling: false)
+        try expect(historicalStore.history.first?.reportedIssues ==
+                   [RunIssue(path: "folder/missing.dng", reasons: [.excludedUncopied])],
+                   "The latest completed sync recovers exact uncopied exclusions for View errors")
 
         try write("hello.txt", "hello world", to: source)
         try write(".DS_Store", "excluded", to: source)
@@ -113,6 +264,85 @@ struct IntegrationTests {
         try expect(PreviewMetrics(Array(sized.suffix(1))).sizeLabel == "Size unavailable", "Missing deletion sizes are not reported as zero")
         try expect(additions.contains { $0.kind == .added && $0.targetPath == destination.appendingPathComponent("hello.txt").path }, "Visual preview maps additions to their exact destination")
         try expect(additions.contains { $0.isLink && $0.name == "hello-link" }, "Visual preview identifies symbolic links")
+
+        let planSource = root.appendingPathComponent("plan-source")
+        let planDestination = root.appendingPathComponent("plan-destination")
+        try fm.createDirectory(at: planSource.appendingPathComponent("nested"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: planDestination.appendingPathComponent("old"), withIntermediateDirectories: true)
+        try write("planned.txt", "previewed", to: planSource.appendingPathComponent("nested"))
+        try write("Icon\r", "custom folder icon", to: planSource.appendingPathComponent("nested"))
+        try write("line\nbreak.txt", "newline name", to: planSource.appendingPathComponent("nested"))
+        try write("obsolete.txt", "remove me", to: planDestination.appendingPathComponent("old"))
+        var planPair = SyncPair(name: "Planned", source: planSource.path, destination: planDestination.path)
+        planPair.options.deleteExtraneous = true
+        let planPreviewRun = try await run(planPair, preview: true)
+        var planPreview = SyncPreview(pair: planPair, changes: SyncPreview.parse(planPreviewRun.2, pair: planPair),
+                                      complete: true, succeeded: planPreviewRun.0 == 0)
+        planPreview.captureDeletionSnapshots()
+        try expect(planPreview.changes.contains { $0.kind == .deleted && $0.relativePath == "old/obsolete.txt" }, "Plan includes exact previewed deletions")
+        try write("late.txt", "not in preview", to: planSource.appendingPathComponent("nested"))
+        try write("later-extra.txt", "keep", to: planDestination)
+        let plan = try RsyncCommand.previewPlan(planPreview, for: planPair, in: root.appendingPathComponent("plan-files"))
+        try expect(plan.passes.count == 1 && plan.passes[0].contains(where: { $0.hasPrefix("--files-from=") }) &&
+                   !plan.passes[0].contains("--recursive") && !plan.passes[0].contains("--delete-after"),
+                   "Plan uses only listed paths and skips full-tree deletion")
+        let planResult = try await run(planPair, plan: plan)
+        try expect(planResult.0 == 0 && fm.fileExists(atPath: planDestination.appendingPathComponent("nested/planned.txt").path),
+                   "Previewed nested file is copied")
+        try expect(fm.fileExists(atPath: planDestination.appendingPathComponent("nested/Icon\r").path) &&
+                   fm.fileExists(atPath: planDestination.appendingPathComponent("nested/line\nbreak.txt").path),
+                   "Previewed Mac icon and newline filenames are copied")
+        try expect(!fm.fileExists(atPath: planDestination.appendingPathComponent("nested/late.txt").path) &&
+                   fm.fileExists(atPath: planDestination.appendingPathComponent("later-extra.txt").path),
+                   "Files added after Preview are outside the plan")
+        try expect(!fm.fileExists(atPath: planDestination.appendingPathComponent("old").path),
+                   "Only previewed extra file and folder are deleted")
+        try expect(RsyncCommand.safeChild("../outside", of: planDestination.path) == nil &&
+                   RsyncCommand.safeChild("absolute/../outside", of: planDestination.path) == nil &&
+                   RsyncCommand.safeChild("line\0break", of: planDestination.path) == nil,
+                   "Traversal and NUL paths cannot enter a plan")
+        var stalePreview = planPreview
+        stalePreview.succeeded = false
+        do {
+            _ = try RsyncCommand.previewPlan(stalePreview, for: planPair, in: root.appendingPathComponent("incomplete-plan"))
+            throw SyncError.invalid("FAIL: Incomplete preview must be rejected")
+        } catch SyncError.invalid(let message) where !message.hasPrefix("FAIL:") {
+            print("PASS: Incomplete preview is rejected")
+        }
+        let changedDelete = planDestination.appendingPathComponent("changed-delete.txt")
+        try Data("before".utf8).write(to: changedDelete)
+        let originalSnapshot = DeletionSnapshot.capture(changedDelete.path)!
+        try Data("after and longer".utf8).write(to: changedDelete)
+        let staleDeletion = PlannedDeletion(sourceRoot: planSource.path, targetRoot: planDestination.path,
+                                            relativePath: "changed-delete.txt", isDirectory: false,
+                                            snapshot: originalSnapshot)
+        do {
+            try staleDeletion.apply()
+            throw SyncError.invalid("FAIL: Changed destination must not be deleted")
+        } catch SyncError.invalid(let message) where !message.hasPrefix("FAIL:") {
+            try expect(fm.fileExists(atPath: changedDelete.path), "Changed destination is protected from planned deletion")
+        }
+        let actionSource = root.appendingPathComponent("action-source")
+        let actionDestination = root.appendingPathComponent("action-destination")
+        try fm.createDirectory(at: actionSource, withIntermediateDirectories: true)
+        try fm.createDirectory(at: actionDestination, withIntermediateDirectories: true)
+        try write("previewed.txt", "selected", to: actionSource)
+        let actionPair = SyncPair(name: "Action", source: actionSource.path, destination: actionDestination.path)
+        let actionStore = AppStore(dataDirectory: root.appendingPathComponent("action-settings"), enableScheduling: false)
+        actionStore.start(actionPair, preview: true)
+        while actionStore.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        try expect(actionStore.canSyncPreview(actionPair), "Completed preview enables its sync action")
+        var changedPair = actionPair
+        changedPair.options.checksum = true
+        try expect(!actionStore.canSyncPreview(changedPair), "Changing sync options disables the preview action")
+        try write("later.txt", "not selected", to: actionSource)
+        actionStore.startPreviewSync(actionPair)
+        while actionStore.isRunning { try await Task.sleep(for: .milliseconds(20)) }
+        try expect(actionStore.history.first?.succeeded == true &&
+                   fm.fileExists(atPath: actionDestination.appendingPathComponent("previewed.txt").path) &&
+                   !fm.fileExists(atPath: actionDestination.appendingPathComponent("later.txt").path),
+                   "App action applies the completed preview without scanning later files")
+        try expect(actionStore.syncPreview == nil, "Applied preview is cleared after a successful sync")
         let fixture = "RSYNCER|cd+++++++|nested/\nRSYNCER|>f+++++++|nested/name|with spaces.txt\nPass 2/2: Destination → Source\nRSYNCER|>f.s....|ignored short code\nRSYNCER|>f.s.......|changed.txt\n*deleting old.txt\n"
         let planned = SyncPreview.parse(fixture, pair: pair)
         try expect(planned.count == 4 && planned[0].isDirectory, "Visual preview parses folders and rejects malformed item records")
@@ -226,6 +456,14 @@ struct IntegrationTests {
         result = try await run(twoWay, preview: true)
         try expect(result.0 == 0 && result.2.contains("Pass 2/2"), "Two-way preview checks both directions")
         try expect(!fm.fileExists(atPath: source.appendingPathComponent("right-only.txt").path) && !fm.fileExists(atPath: destination.appendingPathComponent("left-only.txt").path), "Two-way preview writes to neither side")
+        let twoWayPreview = SyncPreview(pair: twoWay, changes: SyncPreview.parse(result.2, pair: twoWay), complete: true, succeeded: true)
+        let twoWayPlan = try RsyncCommand.previewPlan(twoWayPreview, for: twoWay, in: root.appendingPathComponent("two-way-plan"))
+        try expect(twoWayPlan.passes.count == 2 && twoWayPlan.passes.allSatisfy { $0.contains(where: { $0.hasPrefix("--files-from=") }) },
+                   "Two-way plan keeps separate file lists for each direction")
+        result = try await run(twoWay, plan: twoWayPlan)
+        try expect(result.0 == 0 && fm.fileExists(atPath: source.appendingPathComponent("right-only.txt").path) &&
+                   fm.fileExists(atPath: destination.appendingPathComponent("left-only.txt").path),
+                   "Two-way previewed paths sync in both directions")
         result = try await run(twoWay)
         let merged = try String(contentsOf: source.appendingPathComponent("hello.txt"), encoding: .utf8)
         try expect(result.0 == 0 && merged == "newer right version", "Two-way sync brings back newer destination content")
@@ -306,10 +544,11 @@ struct IntegrationTests {
         try expect(ProcessedItem.parse("rsync(4242): : .: updating directory") == ProcessedItem.parse(".d        ./"), "The destination root compares equal in both reports")
         try expect(ProcessedItem.parse(">f..t.... newer.txt")?.path == "newer.txt", "Transferred files are recognised")
         try expect(ProcessedItem.parse(".f...p..... a  b.txt")?.path == "a  b.txt", "Standard rsync itemized entries keep their full path")
+        try expect(ProcessedItem.parse("RSYNCER2|>f+++++++|123|a|b.png")?.path == "a|b.png", "Formatted transfer entries preserve pipes in filenames")
         try expect(ProcessedItem.parse("Skip newer 'to sort/DSC01475.tif'")?.path == "to sort/DSC01475.tif", "Files skipped for being newer count as checked items")
         try expect(ProcessedItem.parse("rsync(4242): : src/big.bin: read block prologue: 0 blocks") == nil && ProcessedItem.parse("rsync(4242): : downloader: phase complete") == nil, "Other diagnostics are not items")
         try expect(ProcessedItem.parse("*deleting old.txt") == nil, "Deletions are not counted as checked items")
-        try expect(ProcessedItem.parse("RSYNCER2|>f+++++++|0|x") == nil && ProcessedItem.parse("Transfer starting: 10 files") == nil, "Preview and scan lines are not items")
+        try expect(ProcessedItem.parse("Transfer starting: 10 files") == nil, "Scan headings are not items")
         try expect(ProcessedItem.parse("     1,024  42%  1.2MB/s 0:00:03") == nil && ProcessedItem.parse("sent 9865 bytes  received 1394 bytes") == nil, "Progress and summary lines are not items")
         try expect(ProcessedItem.parse(".f        ") == nil && ProcessedItem.parse("Skip newer ''") == nil && ProcessedItem.parse("rsync(1): : : skipping: up to date") == nil, "Entries without a path are ignored")
         try expect(RsyncOutput.isDebugLine("rsync(4242): : a: skipping: up to date") && !RsyncOutput.isDebugLine("rsync(4242): error: boom") && !RsyncOutput.isDebugLine("rsync(4242): warning: hmm"), "Only diagnostics are treated as debug output")
