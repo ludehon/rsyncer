@@ -17,9 +17,18 @@ struct SyncOptionsView: View {
 
             OptionsSection(title: "Existing files", symbol: "doc.on.doc") {
                 if twoWay {
-                    Label("Newer files win in both directions. Files found on only one side are kept and copied across.", systemImage: "arrow.left.arrow.right")
+                    Label("Changes made to the same file on both sides are detected after the first successful sync.", systemImage: "arrow.left.arrow.right")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    Picker("When both copies changed", selection: $options.conflictPolicy) {
+                        ForEach(ConflictPolicy.allCases) { policy in Text(policy.title).tag(policy) }
+                    }
+                    .font(.system(size: 12))
+                    Text(options.conflictPolicy == .keepBoth
+                         ? "The destination copy is preserved with “conflict from Destination” in its name before syncing."
+                         : "The chosen side replaces the other copy before syncing.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
                     Divider()
                 } else {
                     OptionRow(title: "Protect newer destination files", detail: "Skip a file when the destination has a more recent version.", value: $options.skipNewer)

@@ -1,24 +1,21 @@
 import SwiftUI
 
 struct SyncPreviewView: View {
+    private enum ChangeLayout { case list, grid }
+    private enum ChangeSort { case name, kind, size, type }
+
     @EnvironmentObject private var store: AppStore
     @Environment(\.colorScheme) private var colorScheme
     let pairID: UUID
-    @State private var filter: PreviewChange.Kind?
     @State private var search = ""
-    @State private var showingDetails = false
-    @State private var targetFilter: String?
+    @State private var conflictsExpanded = false
+    @State private var changeLayout = ChangeLayout.list
+    @State private var changeSort = ChangeSort.name
+    @State private var sortAscending = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let preview = store.syncPreview, preview.pair.id == pairID {
-                VStack(spacing: 10) {
-                    transferCard(preview, from: preview.pair.source, to: preview.pair.destination)
-                    if preview.pair.direction == .twoWay {
-                        transferCard(preview, from: preview.pair.destination, to: preview.pair.source)
-                    }
-                }.frame(maxWidth: 820)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 if !preview.complete {
                     status("Comparing your locations…", detail: "The file plan will appear when the comparison finishes.", icon: "magnifyingglass")
                 } else {
@@ -31,34 +28,48 @@ struct SyncPreviewView: View {
                         Label("Settings changed. Run Preview again to refresh this plan.", systemImage: "arrow.clockwise")
                             .font(.system(size: 11)).foregroundStyle(.orange)
                     }
-                    HStack(spacing: 10) {
-                        ForEach(PreviewChange.Kind.allCases, id: \.self) { kind in
-                            let changes = preview.changes.filter { $0.kind == kind }
-                            let metrics = PreviewMetrics(changes)
-                            Button { openDetails(kind: kind) } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack {
-                                        Label(kind.rawValue, systemImage: symbol(kind))
-                                            .font(.system(size: 12, weight: .semibold))
-                                        Spacer(minLength: 0)
-                                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    if !preview.conflicts.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Label("\(preview.conflicts.count) two-way \(preview.conflicts.count == 1 ? "conflict" : "conflicts") detected", systemImage: "arrow.triangle.branch")
+                                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+                            Text("\(preview.pair.options.conflictPolicy.title) will be applied during sync. " + preview.conflicts.prefix(3).map(\.relativePath).joined(separator: " · "))
+                                .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(3)
+                            Menu {
+                                ForEach(ConflictPolicy.allCases) { policy in
+                                    Button {
+                                        store.setConflictPolicy(policy, for: pairID)
+                                    } label: {
+                                        if preview.pair.options.conflictPolicy == policy {
+                                            Label(policy.title, systemImage: "checkmark")
+                                        } else { Text(policy.title) }
                                     }
-                                    Text(changes.count.formatted()).font(.system(size: 22, weight: .semibold))
-                                    Text(metrics.countLabel).font(.system(size: 10))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Text(metrics.sizeLabel).font(.system(size: 13, weight: .medium))
-                                }.foregroundStyle(cardTextColor(kind)).padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                                    .cardSurface(radius: 10, fill: color(kind).opacity(colorScheme == .dark ? 0.14 : 0.09),
-                                                 stroke: color(kind).opacity(colorScheme == .dark ? 0.3 : 0.22))
-                            }.buttonStyle(.plain).help("View \(kind.rawValue.lowercased()) items")
+                                }
+                            } label: {
+                                Label("Resolve: \(preview.pair.options.conflictPolicy.title)", systemImage: "slider.horizontal.3")
+                            }
+                            .menuStyle(.borderlessButton).fixedSize()
+                            DisclosureGroup("Review conflicting files", isExpanded: $conflictsExpanded) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    ForEach(preview.conflicts.prefix(250)) { conflict in
+                                        Text(conflict.relativePath).font(.system(size: 10, design: .monospaced))
+                                            .lineLimit(1).truncationMode(.middle)
+                                    }
+                                    if preview.conflicts.count > 250 {
+                                        Text("Showing 250 of \(preview.conflicts.count.formatted()) conflicts")
+                                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                                    }
+                                }.padding(.top, 7)
+                            }
+                            .font(.system(size: 10, weight: .medium))
                         }
-                    }.frame(maxWidth: 820)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).frame(maxWidth: 820, alignment: .leading)
+                        .cardSurface(radius: 10, fill: Color.orange.opacity(0.08), stroke: Color.orange.opacity(0.25))
+                    }
+                    summaryCards(preview)
                     if preview.changes.isEmpty && preview.succeeded {
                         status("No file changes needed", detail: "These locations match under your current sync options.", icon: "checkmark.circle")
                     } else if !preview.changes.isEmpty {
-                        destinationSummary(preview)
+                        plannedChanges(preview)
                     }
                     Text("Sizes describe affected file contents, not transfer bytes or space saved. Folder and link sizes are excluded. Unavailable sizes are marked; updates can include metadata only.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
@@ -68,7 +79,7 @@ struct SyncPreviewView: View {
                     }
                 }
                 if preview.pair.direction == .twoWay {
-                    Text("Both directions are compared independently. Each group shows the location that would receive the changes; newer files win during sync.")
+                    Text("Both directions are compared independently. Each group shows the location that would receive changes. Conflicts use the policy selected in Sync options.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 if preview.pair.options.extendedAttributes {
@@ -79,174 +90,275 @@ struct SyncPreviewView: View {
                 status("A clear view before you sync", detail: "Choose Preview below to see additions, updates, and deletions at each destination.", icon: "eye")
             }
         }
-        .sheet(isPresented: $showingDetails) {
-            if let preview = store.syncPreview, preview.pair.id == pairID {
-                details(preview)
-                    .background(SheetOutsideClickDismissal { showingDetails = false })
-            }
-        }
-        .onChange(of: store.syncPreview?.complete) { _, complete in
-            if complete == false { showingDetails = false }
-        }
     }
 
-    private func openDetails(kind: PreviewChange.Kind? = nil, target: String? = nil) {
-        filter = kind
-        targetFilter = target
-        search = ""
-        showingDetails = true
-    }
-
-    private func destinationSummary(_ preview: SyncPreview) -> some View {
-        let groups = Dictionary(grouping: preview.changes, by: \.targetRoot)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("WHERE CHANGES WILL HAPPEN").font(.system(size: 9, weight: .semibold)).tracking(1)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("View all details") { openDetails() }.font(.system(size: 11))
-            }
-            ForEach(groups.keys.sorted(), id: \.self) { target in
-                let changes = groups[target] ?? []
+    private func summaryCards(_ preview: SyncPreview) -> some View {
+        HStack(spacing: 12) {
+            ForEach(PreviewChange.Kind.allCases, id: \.self) { kind in
+                let changes = preview.changes.filter { $0.kind == kind }
                 let metrics = PreviewMetrics(changes)
-                Button { openDetails(target: target) } label: {
-                    HStack(spacing: 16) {
-                        Image(systemName: "externaldrive.fill").font(.system(size: 28)).foregroundStyle(Palette.accent)
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(URL(fileURLWithPath: target).lastPathComponent).font(.system(size: 14, weight: .semibold))
-                            Text(target).font(.system(size: 10)).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(metrics.countLabel).font(.system(size: 11)).foregroundStyle(.secondary)
-                            GeometryReader { geometry in
-                                HStack(spacing: 2) {
-                                    ForEach(PreviewChange.Kind.allCases, id: \.self) { kind in
-                                        let count = changes.filter { $0.kind == kind }.count
-                                        if count > 0 {
-                                            Rectangle().fill(color(kind))
-                                                .frame(width: max(0, geometry.size.width - 4) * Double(count) / Double(changes.count))
-                                        }
-                                    }
-                                }.clipShape(Capsule())
-                            }.frame(height: 5).accessibilityHidden(true)
-                        }
-                        Spacer(minLength: 8)
-                        VStack(alignment: .trailing, spacing: 7) {
-                            Text(metrics.sizeLabel).font(.system(size: 16, weight: .semibold))
-                            Text("View details →").font(.system(size: 10)).foregroundStyle(Palette.accent)
-                        }
-                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .cardSurface(radius: 10)
-                }.buttonStyle(.plain)
+                HStack(spacing: 14) {
+                    Image(systemName: summarySymbol(kind))
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(cardTextColor(kind))
+                        .frame(width: 52, height: 52)
+                        .background(color(kind).opacity(colorScheme == .dark ? 0.22 : 0.13), in: Circle())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(changes.count.formatted())
+                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                            .foregroundStyle(cardTextColor(kind))
+                            .monospacedDigit()
+                        Text(summaryTitle(kind))
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(metrics.countLabel)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(metrics.sizeLabel)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(cardTextColor(kind))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+                .cardSurface(radius: 14,
+                             fill: color(kind).opacity(colorScheme == .dark ? 0.12 : 0.055),
+                             stroke: color(kind).opacity(colorScheme == .dark ? 0.22 : 0.10))
             }
-        }.frame(maxWidth: 820)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
-    private func details(_ preview: SyncPreview) -> some View {
-        let visible = preview.changes.filter {
-            (filter == nil || $0.kind == filter) && (targetFilter == nil || $0.targetRoot == targetFilter) &&
-            (search.isEmpty || $0.targetPath.localizedCaseInsensitiveContains(search))
-        }
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack {
+    private func plannedChanges(_ preview: SyncPreview) -> some View {
+        let visible = visibleChanges(in: preview)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .bottom, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Preview details").font(.system(size: 20, weight: .semibold))
-                    Text("\(visible.count.formatted()) items · \(PreviewMetrics(visible).sizeLabel)")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text("Planned changes").font(.system(size: 16, weight: .semibold))
+                    Text("Here’s what will happen when you sync.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button("Done") { showingDetails = false }.keyboardShortcut(.cancelAction)
+                Spacer(minLength: 12)
+                HStack(spacing: 8) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        TextField("Search files and folders…", text: $search)
+                            .textFieldStyle(.plain).font(.system(size: 11))
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(width: 250, height: 34)
+                    .background(Palette.cardFill, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Palette.cardStroke) }
+                    HStack(spacing: 0) {
+                        layoutButton(.list, symbol: "list.bullet")
+                        layoutButton(.grid, symbol: "square.grid.2x2")
+                    }
+                    .padding(2)
+                    .background(Palette.cardFill, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Palette.cardStroke) }
+                }
             }
-            if let targetFilter { Text(targetFilter).font(.system(size: 11)).textSelection(.enabled) }
-            HStack {
-                TextField("Find a file or folder…", text: $search).textFieldStyle(.roundedBorder)
-                Picker("Changes", selection: $filter) {
-                    Text("All changes").tag(Optional<PreviewChange.Kind>.none)
-                    ForEach(PreviewChange.Kind.allCases, id: \.self) { kind in
-                        Text(kind.rawValue).tag(Optional(kind))
-                    }
-                }.labelsHidden().frame(width: 140)
-            }
-            // A bounded native list reuses rows for previews with thousands of files.
-            List(visible) { change in
-                HStack(spacing: 12) {
-                    Image(systemName: change.isDirectory ? "folder.fill" : change.isLink ? "link" : "doc.fill")
-                        .font(.system(size: 22)).foregroundStyle(color(change.kind)).frame(width: 28)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(change.name).font(.system(size: 12, weight: .medium))
-                        Text(change.targetPath).font(.system(size: 10)).foregroundStyle(.secondary)
-                            .textSelection(.enabled).lineLimit(2).help(change.targetPath)
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 5) {
-                        Label(change.kind.rawValue, systemImage: symbol(change.kind))
-                            .font(.system(size: 10, weight: .medium)).foregroundStyle(color(change.kind))
-                        if !change.isDirectory && !change.isLink {
-                            Text(change.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Size unavailable")
-                                .font(.system(size: 10)).foregroundStyle(.secondary)
-                        }
-                    }
-                }.padding(.vertical, 7)
-            }.listStyle(.inset)
-                .overlay { if visible.isEmpty { Text("No changes match this filter.").foregroundStyle(.secondary) } }
-        }.padding(24).frame(width: 720, height: 540)
-    }
 
-    private func transferCard(_ preview: SyncPreview, from source: String, to destination: String) -> some View {
-        let target = RsyncCommand.url(for: destination).path
-        let changes = preview.changes.filter { $0.targetRoot == target && $0.kind != .deleted }
-        let metrics = PreviewMetrics(changes)
-        return HStack(spacing: 18) {
-            endpoint(source, title: "FROM", destination: false)
-            VStack(spacing: 7) {
-                Text(preview.complete ? metrics.sizeLabel : "Comparing…")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Palette.accentBright)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 0) {
-                    Circle().fill(Palette.accentBright.opacity(0.5)).frame(width: 6, height: 6)
-                    Capsule().fill(LinearGradient(colors: [Palette.accentBright.opacity(0.45), Palette.accentBright],
-                                                  startPoint: .leading, endPoint: .trailing))
-                        .frame(height: 3)
-                    Image(systemName: "arrowtriangle.right.fill")
-                        .font(.system(size: 13)).foregroundStyle(Palette.accentBright).offset(x: -1)
-                }.frame(maxWidth: .infinity).frame(height: 16)
-                    .shadow(color: Palette.accentBright.opacity(0.45), radius: 5)
-                    .accessibilityLabel("To")
-                Text(preview.complete ? (preview.succeeded ? "Planned file contents" : "Partial file contents") : "Calculating size")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }.frame(width: 125, alignment: .center)
-                .help("Size of added and updated files in this direction. Excludes deletions, folders and links; actual transferred bytes may differ.")
-            endpoint(destination, title: "TO", destination: true)
+            if visible.isEmpty {
+                Text("No planned changes match your search.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(.vertical, 28)
+                    .cardSurface(radius: 12)
+            } else if changeLayout == .list {
+                changeList(visible, allChanges: preview.changes)
+            } else {
+                changeGrid(visible, allChanges: preview.changes)
+            }
         }
-        .padding(18)
-        .cardSurface(radius: 15)
     }
 
-    private func endpoint(_ path: String, title: String, destination: Bool) -> some View {
-        HStack(alignment: .top, spacing: 11) {
-            Image(systemName: destination ? "externaldrive.fill" : "folder.fill")
-                .font(.system(size: 26, weight: .regular))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(destination ? Palette.accent : Color.blue)
-                .frame(width: 46, height: 46)
-                .background((destination ? Palette.accent : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: destination ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(destination ? Palette.accent : Color.blue)
-                        .background(.background, in: Circle()).offset(x: 3, y: 3)
-                }
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.system(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(.secondary)
-                Text(URL(fileURLWithPath: path).lastPathComponent)
-                    .font(.system(size: 14, weight: .semibold)).lineLimit(1).help(path)
-                Text(path).font(.system(size: 10)).foregroundStyle(.secondary).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+    private func layoutButton(_ layout: ChangeLayout, symbol: String) -> some View {
+        Button { changeLayout = layout } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(changeLayout == layout ? Palette.accentInk : .secondary)
+                .frame(width: 34, height: 30)
+                .background(changeLayout == layout ? Palette.accent.opacity(0.10) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(layout == .list ? "List view" : "Grid view")
+        .accessibilityAddTraits(changeLayout == layout ? .isSelected : [])
+        .help(layout == .list ? "Show as a list" : "Show as a grid")
+    }
+
+    private func changeList(_ changes: [PreviewChange], allChanges: [PreviewChange]) -> some View {
+        LazyVStack(spacing: 0) {
+            HStack(spacing: 12) {
+                sortButton("Name", key: .name).frame(maxWidth: .infinity, alignment: .leading)
+                sortButton("Change", key: .kind).frame(width: 100, alignment: .leading)
+                sortButton("Size", key: .size).frame(width: 105, alignment: .leading)
+                sortButton("Type", key: .type).frame(width: 82, alignment: .leading)
+                Color.clear.frame(width: 10)
             }
-        }.frame(maxWidth: .infinity, alignment: destination ? .trailing : .leading)
+            .padding(.horizontal, 15).frame(height: 36)
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            Divider()
+            ForEach(changes) { change in
+                HStack(spacing: 12) {
+                    HStack(spacing: 11) {
+                        Image(systemName: fileSymbol(change))
+                            .font(.system(size: 17, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(change.isDirectory ? Palette.accentInk : .secondary)
+                            .frame(width: 25)
+                        Text(change.relativePath == "." ? URL(fileURLWithPath: change.targetRoot).lastPathComponent : change.relativePath)
+                            .font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            .truncationMode(.middle).help(change.targetPath)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    changeBadge(change.kind).frame(width: 100, alignment: .leading)
+                    Text(displaySize(for: change, allChanges: allChanges))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .frame(width: 105, alignment: .leading)
+                    Text(fileType(change))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .frame(width: 82, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                        .frame(width: 10)
+                }
+                .padding(.horizontal, 15).frame(minHeight: 43)
+                .overlay(alignment: .bottom) { Divider() }
+            }
+        }
+        .cardSurface(radius: 12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func changeGrid(_ changes: [PreviewChange], allChanges: [PreviewChange]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
+            ForEach(changes) { change in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top) {
+                        Image(systemName: fileSymbol(change))
+                            .font(.system(size: 24, weight: .medium)).symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(change.isDirectory ? Palette.accentInk : .secondary)
+                        Spacer()
+                        changeBadge(change.kind)
+                    }
+                    Text(change.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(change.relativePath).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(change.targetPath)
+                    HStack {
+                        Text(fileType(change))
+                        Spacer()
+                        Text(displaySize(for: change, allChanges: allChanges))
+                    }
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                .padding(14).frame(maxWidth: .infinity, minHeight: 118, alignment: .leading)
+                .cardSurface(radius: 12)
+            }
+        }
+    }
+
+    private func sortButton(_ title: String, key: ChangeSort) -> some View {
+        Button {
+            if changeSort == key { sortAscending.toggle() }
+            else { changeSort = key; sortAscending = true }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                Image(systemName: changeSort == key ? (sortAscending ? "chevron.up" : "chevron.down") : "chevron.up.chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func changeBadge(_ kind: PreviewChange.Kind) -> some View {
+        Text(kind.rawValue)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(cardTextColor(kind))
+            .padding(.horizontal, 11).padding(.vertical, 4)
+            .background(color(kind).opacity(colorScheme == .dark ? 0.20 : 0.11), in: Capsule())
+    }
+
+    private func visibleChanges(in preview: SyncPreview) -> [PreviewChange] {
+        let matching = preview.changes.filter {
+            search.isEmpty || $0.relativePath.localizedCaseInsensitiveContains(search) ||
+            $0.targetRoot.localizedCaseInsensitiveContains(search) ||
+            $0.kind.rawValue.localizedCaseInsensitiveContains(search) ||
+            fileType($0).localizedCaseInsensitiveContains(search)
+        }
+        return matching.sorted { lhs, rhs in
+            let order: ComparisonResult
+            switch changeSort {
+            case .name: order = lhs.relativePath.localizedStandardCompare(rhs.relativePath)
+            case .kind: order = lhs.kind.rawValue.localizedStandardCompare(rhs.kind.rawValue)
+            case .size: order = (lhs.size ?? -1) < (rhs.size ?? -1) ? .orderedAscending : (lhs.size == rhs.size ? .orderedSame : .orderedDescending)
+            case .type: order = fileType(lhs).localizedStandardCompare(fileType(rhs))
+            }
+            if order == .orderedSame { return lhs.relativePath.localizedStandardCompare(rhs.relativePath) == .orderedAscending }
+            return sortAscending ? order == .orderedAscending : order == .orderedDescending
+        }
+    }
+
+    private func displaySize(for change: PreviewChange, allChanges: [PreviewChange]) -> String {
+        if change.isLink { return "—" }
+        if !change.isDirectory {
+            return change.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "—"
+        }
+        let prefix = change.relativePath == "." ? "" : change.relativePath + "/"
+        let descendants = allChanges.filter {
+            $0.targetRoot == change.targetRoot && !$0.isDirectory && !$0.isLink &&
+            (prefix.isEmpty || $0.relativePath.hasPrefix(prefix))
+        }
+        guard descendants.contains(where: { $0.size != nil }) else { return "—" }
+        let bytes = descendants.compactMap(\.size).reduce(Int64(0), +)
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func fileType(_ change: PreviewChange) -> String {
+        if change.isDirectory { return "Folder" }
+        if change.isLink { return "Link" }
+        switch (change.name as NSString).pathExtension.lowercased() {
+        case "jpg", "jpeg", "png", "gif", "heic", "tif", "tiff", "webp", "raw", "dng": return "Image"
+        case "mov", "mp4", "m4v", "avi", "mkv": return "Video"
+        case "mp3", "m4a", "wav", "aiff", "flac": return "Audio"
+        case "zip", "tar", "gz", "7z", "rar": return "Archive"
+        case "pdf": return "PDF"
+        default: return "File"
+        }
+    }
+
+    private func fileSymbol(_ change: PreviewChange) -> String {
+        switch fileType(change) {
+        case "Folder": return "folder.fill"
+        case "Link": return "link"
+        case "Image": return "photo"
+        case "Video": return "film"
+        case "Audio": return "waveform"
+        case "Archive": return "archivebox.fill"
+        case "PDF": return "doc.richtext.fill"
+        default: return "doc.fill"
+        }
+    }
+
+    private func summaryTitle(_ kind: PreviewChange.Kind) -> String {
+        switch kind {
+        case .added: return "Files to be added"
+        case .updated: return "Files to be updated"
+        case .deleted: return "Files to be deleted"
+        }
+    }
+
+    private func summarySymbol(_ kind: PreviewChange.Kind) -> String {
+        switch kind {
+        case .added: return "plus"
+        case .updated: return "arrow.triangle.2.circlepath"
+        case .deleted: return "minus"
+        }
     }
 
     private func status(_ title: String, detail: String, icon: String) -> some View {
@@ -270,7 +382,4 @@ struct SyncPreviewView: View {
         }
     }
 
-    private func symbol(_ kind: PreviewChange.Kind) -> String {
-        switch kind { case .added: "plus.circle.fill"; case .updated: "arrow.triangle.2.circlepath"; case .deleted: "minus.circle.fill" }
-    }
 }

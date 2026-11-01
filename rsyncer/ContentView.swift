@@ -23,7 +23,7 @@ struct ContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 238)
+            sidebar.frame(width: 224)
             Group {
                 if showVolumes {
                     VolumesView(monitor: store.volumes)
@@ -71,7 +71,7 @@ struct ContentView: View {
         } message: {
             Text("Files in \(store.pairs.first(where: { $0.id == launchID })?.destination ?? "the destination") that do not exist in the source may be permanently deleted. Run a preview first to review the changes.")
         }
-        .alert("rsyncer needs your attention", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
+        .alert("Rsyncer couldn’t continue", isPresented: Binding(get: { store.errorMessage != nil }, set: { if !$0 { store.errorMessage = nil } })) {
             Button("OK") { store.errorMessage = nil }
         } message: { Text(store.errorMessage ?? "") }
     }
@@ -94,13 +94,21 @@ struct ContentView: View {
                     .fill(Palette.soft, style: FillStyle(eoFill: true))
                     .frame(width: 32, height: 32)
                     .accessibilityHidden(true)
-                Text("Rsyncer").font(.system(size: 25, weight: .semibold, design: .rounded))
+                Text("Rsyncer").font(.system(size: 22, weight: .semibold, design: .rounded))
             }.padding(.horizontal, 24).padding(.top, 30).padding(.bottom, 8)
-            Spacer().frame(height: 38)
+            Spacer().frame(height: 32)
             HStack {
                 Text("SAVED SYNCS").font(.system(size: 10, weight: .semibold)).tracking(1.6)
+                Text(store.pairs.count.formatted())
+                    .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.white.opacity(0.08), in: Capsule())
                 Spacer()
-                Menu { newSyncOptions } label: { Image(systemName: "plus").font(.system(size: 13)) }
+                Menu {
+                    newSyncOptions
+                    Divider()
+                    Button("Import sync…", systemImage: "square.and.arrow.down") { store.importPairs() }
+                } label: { Image(systemName: "plus").font(.system(size: 13)) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .accessibilityLabel("Add sync").help("New sync pair")
             }.foregroundStyle(.white.opacity(0.5)).padding(.horizontal, 24).padding(.bottom, 12)
@@ -144,12 +152,20 @@ struct ContentView: View {
                             .accessibilityLabel("Launch \(pair.name.isEmpty ? "Untitled sync" : pair.name)")
                             .padding(.trailing, 8)
                         }
-                        .background(store.selectedID == pair.id && !showVolumes ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                        .background(store.selectedID == pair.id && !showVolumes ? .white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 11))
+                        .overlay(alignment: .leading) {
+                            if store.selectedID == pair.id && !showVolumes {
+                                Capsule().fill(Palette.soft).frame(width: 3, height: 22)
+                            }
+                        }
                         .contextMenu {
                             Button("Rename…", systemImage: "pencil") { renameText = pair.name; renameID = pair.id }
                                 .disabled(store.activePairID == pair.id)
                             Button("Launch", systemImage: "play.fill") { requestLaunch(pair) }
                                 .disabled(store.isRunning || !pair.isConfigured)
+                            Button("Duplicate", systemImage: "plus.square.on.square") { store.duplicatePair(pair.id) }
+                                .disabled(store.activePairID == pair.id)
+                            Button("Export…", systemImage: "square.and.arrow.up") { store.exportPair(pair.id) }
                             Button(store.isPaused && store.activePairID == pair.id ? (store.isPreview ? "Resume preview" : "Resume sync") : (store.isPreview ? "Pause current preview" : "Pause current sync"), systemImage: store.isPaused && store.activePairID == pair.id ? "play.fill" : "pause.fill", action: store.togglePause)
                                 .disabled(store.activePairID != pair.id || store.cancelling)
                             Divider()
@@ -198,7 +214,7 @@ struct ContentView: View {
             }.buttonStyle(.plain).padding(.horizontal, 24).padding(.bottom, 24)
         }
         .foregroundStyle(.white)
-        .background(Palette.sidebar)
+        .background(LinearGradient(colors: [Palette.sidebar, Palette.sidebar.opacity(0.94)], startPoint: .topLeading, endPoint: .bottomTrailing))
     }
 
     private func syncStatus(for pair: SyncPair) -> String {

@@ -2,19 +2,21 @@
 
 A native macOS app for syncing files and folders between local drives and mounted volumes. Requires macOS 14 or later.
 
-![Preview of a one-way sync plan](docs/preview-plan.jpg)
+![Preview of a one-way sync plan](docs/screen.jpg)
 
 ## Features
 
 - **One-way sync** — Copies a file or a folder's contents to a destination. Optionally protects newer destination files and removes files that no longer exist at the source.
-- **Two-way sync** — Merges two folders in both directions, with the newest version of each file winning.
+- **Two-way sync** — Merges two folders in both directions and detects files changed on both sides since the last successful run. Conflicts can preserve both copies or prefer either location.
 - **Safe previews** — Shows planned additions, updates, and deletions before changing anything, with searchable item details and affected file sizes.
 - **Transfer controls** — Start, pause, resume, or stop a sync and follow its per-file progress in the app, menu bar, or Dock.
-- **Scheduling** — Run saved syncs hourly, daily, weekly, or when a drive connects. Missed timed runs resume when the app is available.
+- **Scheduling** — Run saved syncs at minute intervals, hourly, daily, on selected weekdays, weekly, or when a drive connects. Jobs can wait for external power, and missed timed runs resume when the app is available.
 - **Saved syncs** — Automatically saves paths, options, schedules, names, and sidebar order for repeat use.
 - **Transfer options** — Supports timestamps, permissions, links, Mac metadata, checksums, exclusions, bandwidth limits, partial files, and other common `rsync` controls.
 - **Volume status** — Displays free space, capacity, availability, read-only state, and low-space warnings for connected drives.
-- **History and logs** — Keeps the latest 250 runs in the app and writes a complete log for every run.
+- **History and logs** — Keeps the latest 250 runs with change counts, affected sizes, searchable file details, and a complete log for every run.
+- **Notifications** — Reports failures, optional successful runs, and scheduled syncs that have become overdue.
+- **Portable configurations** — Duplicate saved syncs or export and import them as JSON files.
 - **Menu bar and login launch** — Continues running after the window closes and can launch automatically when you sign in.
 - **Themes** — Includes six accent and sidebar colour themes.
 
@@ -34,7 +36,7 @@ If you enable **Launch at login**, macOS may require approval under **System Set
 
 One-way sync never removes source files. Destination-only files are retained unless deletion is explicitly enabled. Deletion applies to scheduled runs and bypasses the Trash.
 
-Two-way sync runs source to destination first, then returns changes in the other direction. Newer modification dates win; deletion is disabled, so a file removed from one side is restored from the other. Checksums can detect equal-size files whose dates also match.
+Two-way sync runs source to destination first, then returns changes in the other direction. After its first successful run, rsyncer saves a file fingerprint baseline. If both copies of a file later change, the selected conflict policy keeps both versions or chooses which location wins. Deletion is disabled, so a file removed from one side is restored from the other. Checksums can detect equal-size files whose dates also match.
 
 The scheduler runs one job at a time. The app prevents idle sleep during transfers, but cannot wake a sleeping or powered-off Mac. Drive-connection schedules only detect mount events while the app is running.
 
@@ -50,37 +52,6 @@ Settings and logs are stored in:
 
 ```text
 ~/Library/Application Support/rsyncer/state.json
+~/Library/Application Support/rsyncer/Manifests/
 ~/Library/Application Support/rsyncer/Logs/
 ```
-
-## Building a DMG
-
-With Xcode installed and selected as the active developer directory, run:
-
-```sh
-./scripts/build-dmg.sh
-```
-
-This builds a Release app for Apple Silicon and Intel Macs and creates `build/Rsyncer-1.0.dmg` (using the app's version number). The disk image contains **Rsyncer.app** and an **Applications** shortcut with large icons, a Retina background, and drag-and-drop instructions. Running the command again replaces the DMG for that version.
-
-Packaging uses Finder to save the installer window layout, so run it in a logged-in macOS desktop session. If macOS asks, allow your terminal to control Finder. The background and layout are defined in `scripts/generate-dmg-background.swift` and `scripts/layout-dmg.applescript`.
-
-Packaging also uses Python 3 (available with Xcode's command-line tools) to finalize the stored icon coordinates and verifies them from the finished, read-only DMG. If Finder shows `.background` or `.fseventsd`, press **Command–Shift–Period** to turn off showing hidden files. Eject older Rsyncer images before opening a rebuilt DMG.
-
-The default build is ad hoc signed for local testing. For public downloads that pass macOS Gatekeeper, use a **Developer ID Application** certificate and Apple notarization, which require Apple Developer Program membership. In Xcode, choose **Product → Archive**, then distribute the archive using **Developer ID**, upload it for notarization, and export the notarized app. Package that export with:
-
-```sh
-./scripts/build-dmg.sh /path/to/export/Rsyncer.app
-```
-
-The script preserves the exported app's signature and notarization ticket. To also sign and notarize the DMG, use your Developer ID identity and a previously configured `notarytool` keychain profile:
-
-```sh
-codesign --timestamp --sign 'Developer ID Application: Your Name (TEAMID)' build/Rsyncer-1.0.dmg
-xcrun notarytool submit build/Rsyncer-1.0.dmg --keychain-profile 'rsyncer-notary' --wait
-# Continue only after the submission status is Accepted.
-xcrun stapler staple build/Rsyncer-1.0.dmg
-xcrun stapler validate build/Rsyncer-1.0.dmg
-```
-
-See Apple's [notarization instructions](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) for certificate and credential setup. Test the downloaded DMG on another Mac before publishing a release.

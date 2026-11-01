@@ -1,10 +1,15 @@
 import AppKit
 import Combine
 import ServiceManagement
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppStore: ObservableObject {
     private static let hideDockIconWhenClosedKey = "hideDockIconWhenClosed"
+    private static let notificationsEnabledKey = "notificationsEnabled"
+    private static let notifyOnSuccessKey = "notifyOnSuccess"
+    private static let notifyWhenOverdueKey = "notifyWhenOverdue"
+    private static let overdueDaysKey = "overdueDays"
 
     @Published var pairs: [SyncPair] = []
     @Published var history: [RunRecord] = []
@@ -33,6 +38,10 @@ final class AppStore: ObservableObject {
     @Published var loginNeedsApproval = false
     @Published var changesSaved = true
     @Published var scheduleStatus: [UUID: String] = [:]
+    @Published var notificationsEnabled = UserDefaults.standard.bool(forKey: notificationsEnabledKey)
+    @Published var notifyOnSuccess = UserDefaults.standard.bool(forKey: notifyOnSuccessKey)
+    @Published var notifyWhenOverdue = UserDefaults.standard.object(forKey: notifyWhenOverdueKey) == nil ? true : UserDefaults.standard.bool(forKey: notifyWhenOverdueKey)
+    @Published var overdueDays = max(1, UserDefaults.standard.object(forKey: overdueDaysKey) == nil ? 3 : UserDefaults.standard.integer(forKey: overdueDaysKey))
     @Published var theme = AppTheme.current { didSet { AppTheme.current = theme } }
     @Published var hideDockIconWhenClosed = UserDefaults.standard.object(forKey: hideDockIconWhenClosedKey) == nil
         ? true
@@ -156,10 +165,66 @@ final class AppStore: ObservableObject {
         save()
     }
 
+    func duplicatePair(_ id: UUID) {
+        guard var copy = pairs.first(where: { $0.id == id }) else { return }
+        copy.id = UUID()
+        copy.name += " copy"
+        copy.lastRun = nil
+        copy.lastSuccessfulRun = nil
+        copy.lastResult = nil
+        copy.nextRun = copy.schedule.nextDate(after: Date())
+        pairs.append(copy)
+        selectedID = copy.id
+        save()
+    }
+
+    func exportPair(_ id: UUID) {
+        guard let pair = pairs.first(where: { $0.id == id }) else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "\(pair.name.isEmpty ? "Sync" : pair.name).rsyncer.json"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(pair).write(to: url, options: .atomic)
+        } catch { errorMessage = "Could not export the saved sync: \(error.localizedDescription)" }
+    }
+
+    func importPairs() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK else { return }
+        do {
+            var imported: [SyncPair] = []
+            for url in panel.urls {
+                let data = try Data(contentsOf: url)
+                if let many = try? JSONDecoder().decode([SyncPair].self, from: data) { imported += many }
+                else { imported.append(try JSONDecoder().decode(SyncPair.self, from: data)) }
+            }
+            let now = Date()
+            for index in imported.indices {
+                imported[index].id = UUID()
+                imported[index].lastRun = nil
+                imported[index].lastSuccessfulRun = nil
+                imported[index].lastResult = nil
+                imported[index].nextRun = imported[index].schedule.nextDate(after: now)
+            }
+            pairs += imported
+            selectedID = imported.last?.id ?? selectedID
+            save()
+        } catch { errorMessage = "Could not import that sync configuration: \(error.localizedDescription)" }
+    }
+
     func removePair(_ id: UUID) {
         guard activePairID != id else { return }
         pairs.removeAll { $0.id == id }
         pendingMounts.remove(id)
+        try? FileManager.default.removeItem(at: manifestURL(for: id))
         if selectedID == id { selectedID = pairs.first?.id }
         save()
     }
@@ -171,6 +236,17 @@ final class AppStore: ObservableObject {
         update(pair)
     }
 
+    func setConflictPolicy(_ policy: ConflictPolicy, for id: UUID) {
+        guard var pair = pairs.first(where: { $0.id == id }) else { return }
+        pair.options.conflictPolicy = policy
+        update(pair)
+        if let preview = syncPreview, preview.pair.id == id,
+           let updated = pairs.first(where: { $0.id == id }) {
+            syncPreview = SyncPreview(pair: updated, changes: preview.changes, conflicts: preview.conflicts,
+                                      complete: preview.complete, succeeded: preview.succeeded)
+        }
+    }
+
     func movePair(_ id: UUID, by offset: Int) {
         guard let index = pairs.firstIndex(where: { $0.id == id }), pairs.indices.contains(index + offset) else { return }
         let pair = pairs.remove(at: index)
@@ -180,10 +256,11 @@ final class AppStore: ObservableObject {
 
     func chooseLocation(source: Bool, pairID: UUID) {
         let panel = NSOpenPanel()
+        let isTwoWay = pairs.first(where: { $0.id == pairID })?.direction == .twoWay
         panel.canChooseDirectories = true
-        panel.canChooseFiles = source && pairs.first(where: { $0.id == pairID })?.direction != .twoWay
+        panel.canChooseFiles = source && !isTwoWay
         panel.allowsMultipleSelection = false
-        panel.prompt = source ? "Choose source" : "Choose destination"
+        panel.prompt = isTwoWay ? "Choose Source \(source ? 1 : 2)" : (source ? "Choose source" : "Choose destination")
         if panel.runModal() == .OK, let url = panel.url { setLocation(url, source: source, pairID: pairID) }
     }
 
@@ -219,6 +296,18 @@ final class AppStore: ObservableObject {
 
     private func begin(pair: SyncPair, preview: Bool, passes: [[String]],
                        plannedDeletions: [PlannedDeletion], planSync: Bool = false) {
+        let conflicts = ConflictTracker.conflicts(for: pair, manifestURL: manifestURL(for: pair.id))
+        if !preview {
+            do { try ConflictTracker.resolve(conflicts, for: pair) }
+            catch {
+                if let activePlanDirectory {
+                    try? FileManager.default.removeItem(at: activePlanDirectory)
+                    self.activePlanDirectory = nil
+                }
+                errorMessage = "Could not preserve the conflicting files: \(error.localizedDescription)"
+                return
+            }
+        }
         let started = Date()
         let logURL = logsDirectory.appendingPathComponent("\(ISO8601DateFormatter().string(from: started).replacingOccurrences(of: ":", with: "-"))-\(UUID().uuidString.prefix(8)).log")
         let command = RsyncCommand.display(passes: passes)
@@ -228,7 +317,7 @@ final class AppStore: ObservableObject {
         activePairID = pair.id
         activePairName = pair.name
         isPreview = preview
-        if preview { syncPreview = SyncPreview(pair: pair) }
+        if preview { syncPreview = SyncPreview(pair: pair, conflicts: conflicts) }
         cancelling = false
         isPaused = false
         progress = nil
@@ -266,16 +355,20 @@ final class AppStore: ObservableObject {
     }
 
     private func finish(pair: SyncPair, started: Date, preview: Bool, code: Int32, cancelled: Bool, logURL: URL) {
+        var parsedChanges: [PreviewChange] = []
+        let previewConflicts = syncPreview?.conflicts ?? []
+        if let log = try? String(contentsOf: logURL, encoding: .utf8) {
+            parsedChanges = SyncPreview.parse(log, pair: pair)
+        }
         if preview {
-            do {
-                let log = try String(contentsOf: logURL, encoding: .utf8)
-                var result = SyncPreview(pair: pair, changes: SyncPreview.parse(log, pair: pair),
+            if FileManager.default.fileExists(atPath: logURL.path) {
+                var result = SyncPreview(pair: pair, changes: parsedChanges, conflicts: previewConflicts,
                                          complete: true, succeeded: code == 0 && !cancelled)
                 if result.succeeded { result.captureDeletionSnapshots() }
                 syncPreview = result
-            } catch {
+            } else {
                 syncPreview = SyncPreview(pair: pair, complete: true)
-                errorMessage = "Could not read the preview: \(error.localizedDescription)"
+                errorMessage = "Could not read the completed preview log."
             }
         }
         if !preview && code == 0 && !cancelled { syncPreview = nil }
@@ -283,13 +376,19 @@ final class AppStore: ObservableObject {
             try? FileManager.default.removeItem(at: activePlanDirectory)
             self.activePlanDirectory = nil
         }
-        var record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path)
+        let summary = makeSummary(parsedChanges)
+        var record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path, summary: summary)
         record.issues = RunIssue.merging(runIssues + (preview ? [] : RunIssue.excludedUncopied(for: pair)))
         history.insert(record, at: 0)
         history = Array(history.prefix(250))
         if let index = pairs.firstIndex(where: { $0.id == pair.id }), !preview {
             pairs[index].lastRun = record.finishedAt
             pairs[index].lastResult = record.title
+            if record.succeeded { pairs[index].lastSuccessfulRun = record.finishedAt }
+        }
+        if record.succeeded && !preview && pair.direction == .twoWay {
+            do { try ConflictTracker.saveManifest(for: pair, to: manifestURL(for: pair.id)) }
+            catch { errorMessage = "The sync completed, but its conflict baseline could not be saved: \(error.localizedDescription)" }
         }
         output += "\n\(record.title) • Exit code \(code)\n"
         progressDetail = record.title
@@ -306,6 +405,13 @@ final class AppStore: ObservableObject {
             errorMessage = !runIssues.isEmpty
                 ? "Sync needs attention for \(runIssues.count) file(s). See their names in Activity and repair the source before retrying."
                 : "rsync exited with code \(code). Some files may not have transferred. Open the run log for details."
+        }
+        if notificationsEnabled && !cancelled {
+            if record.succeeded && notifyOnSuccess && !preview {
+                AppNotifications.send(title: "Sync complete", body: "\(pair.name): \(summary.label)")
+            } else if !record.succeeded {
+                AppNotifications.send(title: "Sync needs attention", body: "\(pair.name) finished with exit code \(code).")
+            }
         }
         volumes.refresh()
         save()
@@ -336,6 +442,7 @@ final class AppStore: ObservableObject {
     }
 
     func tick(now: Date = Date()) {
+        checkForOverduePairs(now: now)
         guard !isRunning else { return }
         for index in pairs.indices {
             let pair = pairs[index]
@@ -347,6 +454,11 @@ final class AppStore: ObservableObject {
             }
             let due = pair.schedule.kind == .onMount ? pendingMounts.contains(pair.id) : (pair.nextRun.map { $0 <= now } ?? false)
             guard due, retryAfter[pair.id].map({ $0 <= now }) ?? true else { continue }
+            if pair.schedule.onlyOnExternalPower && !PowerSource.isUsingExternalPower {
+                scheduleStatus[pair.id] = "Waiting for external power."
+                retryAfter[pair.id] = now.addingTimeInterval(60)
+                continue
+            }
             do { try RsyncCommand.validate(pair) } catch {
                 scheduleStatus[pair.id] = error.localizedDescription
                 retryAfter[pair.id] = now.addingTimeInterval(60)
@@ -375,4 +487,59 @@ final class AppStore: ObservableObject {
     }
 
     func revealLogs() { NSWorkspace.shared.open(logsDirectory) }
+
+    func setNotificationsEnabled(_ enabled: Bool) {
+        if enabled {
+            Task {
+                let granted = await AppNotifications.requestAuthorization()
+                notificationsEnabled = granted
+                UserDefaults.standard.set(granted, forKey: Self.notificationsEnabledKey)
+                if !granted { errorMessage = "Notifications are disabled in System Settings." }
+            }
+        } else {
+            notificationsEnabled = false
+            UserDefaults.standard.set(false, forKey: Self.notificationsEnabledKey)
+        }
+    }
+
+    func saveNotificationPreferences() {
+        UserDefaults.standard.set(notifyOnSuccess, forKey: Self.notifyOnSuccessKey)
+        UserDefaults.standard.set(notifyWhenOverdue, forKey: Self.notifyWhenOverdueKey)
+        UserDefaults.standard.set(max(1, overdueDays), forKey: Self.overdueDaysKey)
+    }
+
+    private func manifestURL(for id: UUID) -> URL {
+        dataDirectory.appendingPathComponent("Manifests", isDirectory: true).appendingPathComponent("\(id.uuidString).json")
+    }
+
+    private func makeSummary(_ changes: [PreviewChange]) -> RunSummary {
+        var result = RunSummary()
+        for change in changes {
+            switch change.kind {
+            case .added: result.added += 1
+            case .updated: result.updated += 1
+            case .deleted: result.deleted += 1
+            }
+            result.bytes += change.size ?? 0
+            if result.details.count < 10_000 {
+                result.details.append(RunChange(kind: change.kind.rawValue, path: change.relativePath,
+                                                targetRoot: change.targetRoot, size: change.size))
+            }
+        }
+        return result
+    }
+
+    private func checkForOverduePairs(now: Date) {
+        guard notificationsEnabled, notifyWhenOverdue else { return }
+        let cutoff = now.addingTimeInterval(-TimeInterval(max(1, overdueDays) * 86_400))
+        for pair in pairs where pair.schedule.kind != .manual {
+            let reference = pair.lastSuccessfulRun ?? pair.lastRun ?? pair.nextRun
+            guard let reference, reference < cutoff else { continue }
+            let key = "overdueNotification.\(pair.id.uuidString)"
+            if let last = UserDefaults.standard.object(forKey: key) as? Date,
+               Calendar.current.isDate(last, inSameDayAs: now) { continue }
+            AppNotifications.send(title: "Sync overdue", body: "\(pair.name) has not completed successfully since \(reference.formatted(date: .abbreviated, time: .omitted)).", identifier: key)
+            UserDefaults.standard.set(now, forKey: key)
+        }
+    }
 }
