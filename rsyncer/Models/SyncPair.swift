@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 struct SyncOptions: Codable, Equatable {
     // Optional storage keeps settings from older releases decodable.
@@ -90,12 +91,14 @@ struct RunIssue: Identifiable, Codable, Hashable, Sendable {
         case stalled
         case truncatedSource
         case incompleteDestination
+        case excludedUncopied
 
         var label: String {
             switch self {
             case .stalled: "Skipped after transfer stopped making progress"
             case .truncatedSource: "Source read was truncated"
             case .incompleteDestination: "Shorter destination copy was skipped"
+            case .excludedUncopied: "Excluded from this sync; destination copy is missing or shorter"
             }
         }
     }
@@ -115,6 +118,46 @@ struct RunIssue: Identifiable, Codable, Hashable, Sendable {
             }
         }
         return issues
+    }
+
+    static func merging(_ issues: [RunIssue]) -> [RunIssue] {
+        var merged: [RunIssue] = []
+        for issue in issues {
+            if let index = merged.firstIndex(where: { $0.path == issue.path }) {
+                merged[index].reasons.formUnion(issue.reasons)
+            } else {
+                merged.append(issue)
+            }
+        }
+        return merged
+    }
+
+    // Only literal, relative file exclusions can identify a precise uncopied path.
+    // Patterns and intentionally excluded files already present at the destination
+    // are not reported as transfer errors.
+    static func excludedUncopied(for pair: SyncPair, command: String? = nil) -> [RunIssue] {
+        let sourceRoot = RsyncCommand.url(for: pair.source).path
+        let destinationRoot = RsyncCommand.url(for: pair.destination).path
+        let issues: [RunIssue] = pair.options.excludePatterns.components(separatedBy: .newlines).compactMap { pattern in
+            let path = pattern.hasPrefix("/") ? String(pattern.dropFirst()) : pattern
+            guard path.contains("/"), !path.contains(where: { "*?[]\\".contains($0) }),
+                  let source = RsyncCommand.safeChild(path, of: sourceRoot),
+                  let destination = RsyncCommand.safeChild(path, of: destinationRoot) else { return nil }
+            if let command {
+                let quoted = "'--exclude=" + pattern.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                guard command.contains(quoted) else { return nil }
+            }
+            var sourceInfo = stat()
+            guard stat(source, &sourceInfo) == 0, sourceInfo.st_mode & S_IFMT == S_IFREG else { return nil }
+            var destinationInfo = stat()
+            if stat(destination, &destinationInfo) == 0 {
+                guard destinationInfo.st_mode & S_IFMT != S_IFREG || destinationInfo.st_size < sourceInfo.st_size else { return nil }
+            } else {
+                guard errno == ENOENT else { return nil }
+            }
+            return RunIssue(path: path, reasons: [.excludedUncopied])
+        }
+        return merging(issues)
     }
 
     static func parse(_ line: String) -> RunIssue? {

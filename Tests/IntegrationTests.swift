@@ -203,6 +203,44 @@ struct IntegrationTests {
         durationRecord.finishedAt = durationStart.addingTimeInterval(8016)
         try expect(durationRecord.durationLabel == "133m 36s", "Long run durations display minutes and remaining seconds")
 
+        let exclusionSource = root.appendingPathComponent("exclusion-source")
+        let exclusionDestination = root.appendingPathComponent("exclusion-destination")
+        try fm.createDirectory(at: exclusionSource, withIntermediateDirectories: true)
+        try fm.createDirectory(at: exclusionDestination, withIntermediateDirectories: true)
+        let excludedFolder = exclusionSource.appendingPathComponent("folder")
+        try fm.createDirectory(at: excludedFolder, withIntermediateDirectories: true)
+        try write("missing.dng", "complete image", to: excludedFolder)
+        var excludedPair = SyncPair(source: exclusionSource.path, destination: exclusionDestination.path)
+        excludedPair.options.excludePatterns = "folder/missing.dng\n*.tmp"
+        let excludedCommand = RsyncCommand.display(for: excludedPair, preview: false)
+        try expect(RunIssue.excludedUncopied(for: excludedPair, command: excludedCommand) ==
+                   [RunIssue(path: "folder/missing.dng", reasons: [.excludedUncopied])],
+                   "A literal excluded file missing at the destination appears in the run error report")
+        try expect(RunIssue.excludedUncopied(for: excludedPair, command: "unrelated command").isEmpty,
+                   "Historical reports do not inherit exclusions added after the run")
+        let destinationFolder = exclusionDestination.appendingPathComponent("folder")
+        try fm.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
+        try write("missing.dng", "short", to: destinationFolder)
+        try expect(RunIssue.excludedUncopied(for: excludedPair).count == 1,
+                   "A shorter destination copy remains visible as uncopied")
+        try write("missing.dng", "complete image", to: destinationFolder)
+        try expect(RunIssue.excludedUncopied(for: excludedPair).isEmpty,
+                   "An excluded file with a full-size destination copy is not reported as uncopied")
+        try fm.removeItem(at: destinationFolder.appendingPathComponent("missing.dng"))
+        let historicalDirectory = root.appendingPathComponent("historical-issues")
+        try fm.createDirectory(at: historicalDirectory, withIntermediateDirectories: true)
+        let historicalLog = historicalDirectory.appendingPathComponent("old-sync.log")
+        try "rsyncer test\nSYNC\n\(excludedCommand)\n".write(to: historicalLog, atomically: true, encoding: .utf8)
+        let historicalRecord = RunRecord(pairID: excludedPair.id, pairName: "Excluded files", startedAt: durationStart,
+                                         finishedAt: durationStart.addingTimeInterval(10), preview: false,
+                                         exitCode: 0, cancelled: false, logPath: historicalLog.path, issues: [])
+        try JSONEncoder().encode(PersistedState(pairs: [excludedPair], history: [historicalRecord]))
+            .write(to: historicalDirectory.appendingPathComponent("state.json"))
+        let historicalStore = AppStore(dataDirectory: historicalDirectory, enableScheduling: false)
+        try expect(historicalStore.history.first?.reportedIssues ==
+                   [RunIssue(path: "folder/missing.dng", reasons: [.excludedUncopied])],
+                   "The latest completed sync recovers exact uncopied exclusions for View errors")
+
         try write("hello.txt", "hello world", to: source)
         try write(".DS_Store", "excluded", to: source)
         try write("extra.txt", "keep by default", to: destination)

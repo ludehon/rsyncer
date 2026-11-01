@@ -64,11 +64,19 @@ final class AppStore: ObservableObject {
                 pairs = state.pairs
                 history = state.history.map { saved in
                     var record = saved
-                    if record.issues == nil, !record.succeeded,
+                    if record.issues == nil,
                        let log = try? String(contentsOfFile: record.logPath, encoding: .utf8) {
                         record.issues = RunIssue.fromLog(log)
                     }
                     return record
+                }
+                // Older successful runs have no record of explicit exclusions.
+                // Recover the latest run when its command contains those rules.
+                for pair in pairs {
+                    guard let index = history.firstIndex(where: { $0.pairID == pair.id && !$0.preview && $0.succeeded }),
+                          history[index].reportedIssues.isEmpty,
+                          let log = try? String(contentsOfFile: history[index].logPath, encoding: .utf8) else { continue }
+                    history[index].issues = RunIssue.excludedUncopied(for: pair, command: log.components(separatedBy: .newlines).prefix(4).joined(separator: "\n"))
                 }
             }
         } catch {
@@ -276,7 +284,7 @@ final class AppStore: ObservableObject {
             self.activePlanDirectory = nil
         }
         var record = RunRecord(pairID: pair.id, pairName: pair.name, startedAt: started, finishedAt: Date(), preview: preview, exitCode: code, cancelled: cancelled, logPath: logURL.path)
-        record.issues = runIssues
+        record.issues = RunIssue.merging(runIssues + (preview ? [] : RunIssue.excludedUncopied(for: pair)))
         history.insert(record, at: 0)
         history = Array(history.prefix(250))
         if let index = pairs.firstIndex(where: { $0.id == pair.id }), !preview {

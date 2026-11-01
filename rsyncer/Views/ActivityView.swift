@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ActivityView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var selectedErrorRecord: RunRecord?
     var pairID: UUID
     private var records: [RunRecord] { store.history.filter { $0.pairID == pairID } }
     private var isActive: Bool { store.activePairID == pairID }
@@ -87,19 +88,79 @@ struct ActivityView: View {
                             Text(record.title).font(.system(size: 12, weight: .medium))
                             Text("\(record.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(record.durationLabel) · exit \(record.exitCode)")
                                 .font(.system(size: 10)).foregroundStyle(.secondary)
+                            if !record.preview && !record.reportedIssues.isEmpty {
+                                Text("\(record.reportedIssues.count) file(s) need attention")
+                                    .font(.system(size: 10)).foregroundStyle(.orange)
+                            }
                         }
                         Spacer()
                         if record.preview { Text("PREVIEW").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary) }
+                        if !record.preview {
+                            Button("View errors") { selectedErrorRecord = record }
+                                .font(.system(size: 11))
+                        }
                         Button { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) } label: { Image(systemName: "doc.text") }.help("Open run log")
-                    }
-                    if !record.reportedIssues.isEmpty {
-                        RunIssueReport(issues: record.reportedIssues)
-                            .padding(.leading, 30)
                     }
                 }.padding(.vertical, 8)
                 Divider()
             }
         }
+        .sheet(item: $selectedErrorRecord) { record in
+            RunErrorSheet(record: record)
+        }
+    }
+}
+
+private struct RunErrorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let record: RunRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Files needing attention").font(.title3.weight(.semibold))
+                    Text("\(record.pairName) · \(record.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !record.reportedIssues.isEmpty {
+                    Button("Copy paths") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(record.reportedIssues.map(\.path).joined(separator: "\n"), forType: .string)
+                    }
+                }
+                Button("Done") { dismiss() }
+            }
+            Divider()
+            if record.reportedIssues.isEmpty {
+                Text("No specific uncopied files were identified. This report covers recorded transfer errors and exact excluded paths with missing or shorter destination copies. See the run log for other errors.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Open run log") { NSWorkspace.shared.open(URL(fileURLWithPath: record.logPath)) }
+                Spacer()
+            } else {
+                Text("\(record.reportedIssues.count) file(s) need attention. Excluded paths were not transferred in this run.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(record.reportedIssues) { issue in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(issue.path)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .textSelection(.enabled)
+                                Text(issue.reasons.map(\.label).sorted().joined(separator: " · "))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 600, minHeight: 400)
     }
 }
 
